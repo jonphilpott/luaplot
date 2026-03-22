@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>luaplot — documentation</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: Georgia, 'Times New Roman', serif;
+    font-size: 16px;
+    line-height: 1.7;
+    color: #1a1a1a;
+    background: #fafaf8;
+  }
+
+  /* ── Layout ── */
+  .page {
+    display: flex;
+    min-height: 100vh;
+  }
+
+  nav {
+    width: 220px;
+    flex-shrink: 0;
+    background: #1a1a1a;
+    color: #ccc;
+    padding: 2rem 1.25rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  main {
+    flex: 1;
+    padding: 3rem 4rem;
+    max-width: 860px;
+  }
+
+  /* ── Nav ── */
+  nav .logo {
+    font-family: 'Courier New', monospace;
+    font-size: 1.1rem;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 2rem;
+    letter-spacing: 0.05em;
+  }
+
+  nav a {
+    display: block;
+    color: #aaa;
+    text-decoration: none;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    padding: 0.2rem 0;
+    border-left: 2px solid transparent;
+    padding-left: 0.6rem;
+  }
+
+  nav a:hover { color: #fff; border-left-color: #fff; }
+
+  nav .nav-section {
+    color: #555;
+    font-family: 'Courier New', monospace;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin: 1.2rem 0 0.4rem;
+  }
+
+  /* ── Typography ── */
+  h1 {
+    font-size: 2rem;
+    font-weight: normal;
+    margin-bottom: 0.4rem;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    font-size: 1.3rem;
+    font-weight: normal;
+    margin-top: 3rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid #ddd;
+  }
+
+  h3 {
+    font-family: 'Courier New', monospace;
+    font-size: 0.95rem;
+    font-weight: bold;
+    margin-top: 1.8rem;
+    margin-bottom: 0.5rem;
+    color: #333;
+  }
+
+  p { margin-bottom: 1rem; }
+
+  .subtitle {
+    color: #666;
+    font-size: 1rem;
+    margin-bottom: 2.5rem;
+  }
+
+  /* ── Code ── */
+  code {
+    font-family: 'Courier New', monospace;
+    font-size: 0.875em;
+    background: #efefec;
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    background: #1a1a1a;
+    color: #e8e8e4;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    padding: 1.25rem 1.5rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 1rem 0 1.5rem;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+  }
+
+  /* Syntax colouring — minimal, readable */
+  .kw  { color: #c792ea; }   /* keywords */
+  .str { color: #c3e88d; }   /* strings */
+  .num { color: #f78c6c; }   /* numbers */
+  .cm  { color: #637777; font-style: italic; }  /* comments */
+  .fn  { color: #82aaff; }   /* function calls */
+  .id  { color: #e8e8e4; }   /* identifiers */
+
+  /* ── Tables ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    margin: 1rem 0 1.5rem;
+  }
+
+  th {
+    text-align: left;
+    font-family: 'Courier New', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #666;
+    border-bottom: 2px solid #ddd;
+    padding: 0.4rem 0.75rem;
+  }
+
+  td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+
+  td:first-child {
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    white-space: nowrap;
+    color: #333;
+  }
+
+  td.type {
+    color: #888;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+
+  td.default {
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: #888;
+  }
+
+  tr:last-child td { border-bottom: none; }
+
+  /* ── Callouts ── */
+  .note {
+    background: #f0f4ff;
+    border-left: 3px solid #6680cc;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.9rem;
+  }
+
+  .note strong { color: #445588; }
+
+  /* ── Coords diagram ── */
+  .coords-wrap {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+    margin: 1rem 0 1.5rem;
+    flex-wrap: wrap;
+  }
+
+  .coords-wrap figure {
+    flex-shrink: 0;
+  }
+
+  .coords-wrap figcaption {
+    font-size: 0.8rem;
+    color: #666;
+    text-align: center;
+    margin-top: 0.4rem;
+  }
+
+  .coords-wrap .coords-text {
+    font-size: 0.9rem;
+    color: #444;
+    line-height: 1.8;
+  }
+
+  /* ── Section spacing ── */
+  section { margin-bottom: 1rem; }
+
+  hr {
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    margin: 3rem 0;
+  }
+
+  /* ── Signature ── */
+  footer {
+    margin-top: 4rem;
+    padding-top: 1rem;
+    border-top: 1px solid #ddd;
+    font-size: 0.8rem;
+    color: #999;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ── Navigation ─────────────────────────────────────────────────────────── -->
+<nav>
+  <div class="logo">luaplot</div>
+
+  <div class="nav-section">Getting started</div>
+  <a href="#overview">Overview</a>
+  <a href="#building">Building</a>
+  <a href="#modes">Output modes</a>
+
+  <div class="nav-section">Coordinates</div>
+  <a href="#coords">Coordinate system</a>
+  <a href="#transforms">Transform stack</a>
+
+  <div class="nav-section">API reference</div>
+  <a href="#api-init">init()</a>
+  <a href="#api-transform">Transforms</a>
+  <a href="#api-primitives">Primitives</a>
+  <a href="#api-curves">Curves</a>
+  <a href="#api-pen">Pen control</a>
+  <a href="#api-done">done()</a>
+
+  <div class="nav-section">Examples</div>
+  <a href="#ex-hello">Hello world</a>
+  <a href="#ex-transforms">Transform stack</a>
+  <a href="#ex-generative">Generative pattern</a>
+  <a href="#ex-text">Text layout</a>
+</nav>
+
+<!-- ── Main content ───────────────────────────────────────────────────────── -->
+<main>
+
+<h1>luaplot</h1>
+<p class="subtitle">A Lua-scriptable toolkit for pen plotters running GRBL.</p>
+
+<!-- ── Overview ── -->
+<section id="overview">
+<h2>Overview</h2>
+<p>
+  luaplot lets you write Lua scripts that drive a pen plotter directly over
+  serial, render to SVG for previewing, or save G-code to a file for
+  repeatable playback. Lua 5.4 is bundled — the only dependency is a C compiler.
+</p>
+<p>
+  The API is modelled on <a href="https://processing.org">Processing</a>:
+  a push/pop transform stack, Y-down coordinates, and simple drawing
+  primitives. luaplot takes care of Y-axis flipping, pen servo control,
+  and GRBL flow control so your scripts stay readable.
+</p>
+</section>
+
+<!-- ── Building ── -->
+<section id="building">
+<h2>Building</h2>
+<p>First-time setup — downloads Lua 5.4.7 source into <code>lua-src/</code>:</p>
+<pre><code>make fetch-lua</code></pre>
+<p>Then build the <code>luaplot</code> executable:</p>
+<pre><code>make</code></pre>
+<p>Run a script:</p>
+<pre><code>./luaplot examples/hello.lua</code></pre>
+<p>
+  Pass extra arguments after the script name — they are available to the
+  script as <code>arg[1]</code>, <code>arg[2]</code>, etc.
+</p>
+</section>
+
+<!-- ── Output modes ── -->
+<section id="modes">
+<h2>Output modes</h2>
+<p>
+  The <code>mode</code> field in <code>plotter.init()</code> controls where
+  output goes.
+</p>
+<table>
+  <thead>
+    <tr><th>Mode</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>serial</td>
+      <td>Send G-code to the plotter in real time. Each command blocks until GRBL replies <code>ok</code>, preventing buffer overrun.</td>
+    </tr>
+    <tr>
+      <td>svg</td>
+      <td>Write an SVG file. No hardware required — good for previewing and iterating on a design.</td>
+    </tr>
+    <tr>
+      <td>gcode</td>
+      <td>Write a <code>.nc</code> G-code file. Send it to the plotter later with any G-code sender for repeatable results.</td>
+    </tr>
+    <tr>
+      <td>both</td>
+      <td>Send to the serial port and write an SVG simultaneously.</td>
+    </tr>
+  </tbody>
+</table>
+</section>
+
+<!-- ── Coordinate system ── -->
+<section id="coords">
+<h2>Coordinate system</h2>
+<p>
+  luaplot uses a <strong>Y-down, origin top-left</strong> coordinate system
+  in scripts — the same as Processing and most drawing APIs. Positive X goes
+  right, positive Y goes down.
+</p>
+<p>
+  GRBL homes to the bottom-left of the work area with Y increasing upward.
+  luaplot flips Y automatically when emitting G-code:
+</p>
+<pre><code>gcode_y = height - lua_y</code></pre>
+<p>
+  SVG also uses Y-down, so no conversion is needed there. You never need to
+  think about this unless you are reading the raw G-code output.
+</p>
+</section>
+
+<!-- ── Transform stack ── -->
+<section id="transforms">
+<h2>Transform stack</h2>
+<p>
+  luaplot maintains a stack of 2D affine matrices. Every drawing call
+  transforms its coordinates through the matrix at the top of the stack
+  before output.
+</p>
+<p>
+  <code>push()</code> saves the current transform; <code>pop()</code>
+  restores it. Calls to <code>translate()</code>, <code>rotate()</code>,
+  and <code>scale()</code> modify the current matrix in place. Transforms
+  compose in the order you write them — the same as Processing.
+</p>
+
+<pre><code><span class="cm">-- draw a rectangle rotated 30° around the point (100, 100)</span>
+<span class="fn">plotter.push</span>()
+  <span class="fn">plotter.translate</span>(<span class="num">100</span>, <span class="num">100</span>)   <span class="cm">-- move origin to pivot point</span>
+  <span class="fn">plotter.rotate</span>(<span class="num">30</span>)            <span class="cm">-- rotate 30° clockwise</span>
+  <span class="fn">plotter.translate</span>(<span class="num">-25</span>, <span class="num">-25</span>)  <span class="cm">-- shift so rect is centred on origin</span>
+  <span class="fn">plotter.rect</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">50</span>, <span class="num">50</span>)
+<span class="fn">plotter.pop</span>()
+<span class="cm">-- back to whatever transform was active before push()</span></code></pre>
+
+<p>
+  The matrix is a standard 2D affine transform stored as six values
+  <code>{a, b, c, d, tx, ty}</code>:
+</p>
+<pre><code>x' = a·x + b·y + tx
+y' = c·x + d·y + ty</code></pre>
+</section>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- API REFERENCE                                                             -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+
+<h2 style="margin-top:1rem">API reference</h2>
+<p>All functions are on the table returned by <code>require 'plotter'</code>.</p>
+
+<!-- ── init() ── -->
+<section id="api-init">
+<h3>plotter.init( config )</h3>
+<p>
+  Initialise the plotter. Must be called before any drawing. Resets the
+  transform stack and all internal state.
+</p>
+
+<table>
+  <thead>
+    <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>mode</td>
+      <td class="type">string</td>
+      <td class="default">"svg"</td>
+      <td>Output mode: <code>"serial"</code>, <code>"svg"</code>, <code>"gcode"</code>, or <code>"both"</code></td>
+    </tr>
+    <tr>
+      <td>width</td>
+      <td class="type">number</td>
+      <td class="default">200</td>
+      <td>Work area width in mm</td>
+    </tr>
+    <tr>
+      <td>height</td>
+      <td class="type">number</td>
+      <td class="default">200</td>
+      <td>Work area height in mm</td>
+    </tr>
+    <tr>
+      <td>port</td>
+      <td class="type">string</td>
+      <td class="default">"/dev/ttyUSB0"</td>
+      <td>Serial port path (serial/both only)</td>
+    </tr>
+    <tr>
+      <td>baud</td>
+      <td class="type">number</td>
+      <td class="default">115200</td>
+      <td>Baud rate (serial/both only)</td>
+    </tr>
+    <tr>
+      <td>feed</td>
+      <td class="type">number</td>
+      <td class="default">1000</td>
+      <td>Drawing feed rate in mm/min (serial/both only)</td>
+    </tr>
+    <tr>
+      <td>pen_up</td>
+      <td class="type">number</td>
+      <td class="default">90</td>
+      <td>Spindle S value for pen-up servo position</td>
+    </tr>
+    <tr>
+      <td>pen_down</td>
+      <td class="type">number</td>
+      <td class="default">30</td>
+      <td>Spindle S value for pen-down servo position</td>
+    </tr>
+    <tr>
+      <td>svg_file</td>
+      <td class="type">string</td>
+      <td class="default">"output.svg"</td>
+      <td>SVG output path (svg/both only)</td>
+    </tr>
+    <tr>
+      <td>gcode_file</td>
+      <td class="type">string</td>
+      <td class="default">"output.nc"</td>
+      <td>G-code output path (gcode mode only)</td>
+    </tr>
+  </tbody>
+</table>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+
+<span class="fn">plotter.init</span> {
+    mode     = <span class="str">"svg"</span>,
+    width    = <span class="num">200</span>,
+    height   = <span class="num">200</span>,
+    svg_file = <span class="str">"my_drawing.svg"</span>,
+}</code></pre>
+</section>
+
+<!-- ── Transforms ── -->
+<section id="api-transform">
+<h3>plotter.push()</h3>
+<p>Save the current transform matrix by pushing a copy onto the stack.</p>
+
+<h3>plotter.pop()</h3>
+<p>Restore the transform saved by the last <code>push()</code>.</p>
+
+<h3>plotter.translate( dx, dy )</h3>
+<p>Move the origin by <code>dx</code>, <code>dy</code>.</p>
+
+<h3>plotter.rotate( angle )</h3>
+<p>
+  Rotate the coordinate system by <code>angle</code> degrees clockwise
+  (in Y-down space). The rotation is around the current origin — use
+  <code>translate()</code> first to rotate around an arbitrary point.
+</p>
+
+<h3>plotter.scale( sx [, sy] )</h3>
+<p>
+  Scale the coordinate system. If <code>sy</code> is omitted, uniform
+  scaling is applied. Passing different values for <code>sx</code> and
+  <code>sy</code> will produce non-uniform scaling — a circle primitive
+  becomes an ellipse, for example.
+</p>
+</section>
+
+<!-- ── Primitives ── -->
+<section id="api-primitives">
+<h3>plotter.line( x1, y1, x2, y2 )</h3>
+<p>
+  Draw a straight line from <code>(x1, y1)</code> to <code>(x2, y2)</code>.
+  The current transform is applied to both endpoints.
+</p>
+
+<h3>plotter.rect( x, y, w, h )</h3>
+<p>
+  Draw a rectangle. <code>(x, y)</code> is the top-left corner;
+  <code>w</code> and <code>h</code> are width and height. Drawn as four
+  separate lines, so the transform applies naturally — rotating the
+  coordinate system rotates the whole rectangle.
+</p>
+
+<h3>plotter.circle( cx, cy, r [, steps] )</h3>
+<p>
+  Draw a circle centred at <code>(cx, cy)</code> with radius <code>r</code>,
+  approximated as a polygon with <code>steps</code> sides (default 36).
+  Increase <code>steps</code> for smoother circles at large sizes.
+</p>
+<p>
+  Applying <code>scale()</code> before drawing a circle produces an ellipse.
+</p>
+
+<h3>plotter.text( x, y, str, height )</h3>
+<p>
+  Draw <code>str</code> using the Hershey Roman Simplex single-stroke font.
+  <code>(x, y)</code> is the left end of the baseline; <code>height</code>
+  is the cap height in drawing units. Returns the total advance width so
+  calls can be chained.
+</p>
+<p>
+  Single-stroke fonts are ideal for plotters — each letter is drawn with the
+  minimum number of pen lifts.
+</p>
+
+<h3>plotter.text_width( str, height )</h3>
+<p>
+  Returns the advance width of <code>str</code> at the given cap height in
+  drawing units, <strong>without drawing anything</strong>. Use this to
+  calculate positions before calling <code>text()</code> — for example to
+  centre or right-align a string.
+</p>
+</section>
+
+<!-- ── Curves & shapes ── -->
+<section id="api-curves">
+<h3>plotter.polyline( points [, close] )</h3>
+<p>
+  The core primitive. Draw a connected path through a list of
+  <code>{x, y}</code> tables. If <code>close</code> is true, a final
+  segment is drawn back to the first point. The pen goes down once at the
+  start and up once at the end — far more efficient than calling
+  <code>line()</code> repeatedly for connected paths.
+</p>
+
+<pre><code><span class="fn">plotter.polyline</span>({ {<span class="num">10</span>,<span class="num">10</span>}, {<span class="num">50</span>,<span class="num">30</span>}, {<span class="num">90</span>,<span class="num">10</span>} }, <span class="kw">false</span>)  <span class="cm">-- open path</span>
+<span class="fn">plotter.polyline</span>({ {<span class="num">10</span>,<span class="num">10</span>}, {<span class="num">50</span>,<span class="num">80</span>}, {<span class="num">90</span>,<span class="num">10</span>} }, <span class="kw">true</span>)   <span class="cm">-- closed triangle</span></code></pre>
+
+<h3>plotter.polygon( points )</h3>
+<p>
+  Draw a closed shape through an arbitrary list of <code>{x, y}</code>
+  points. Equivalent to <code>polyline(points, true)</code>.
+</p>
+
+<pre><code><span class="cm">-- equilateral triangle</span>
+<span class="fn">plotter.polygon</span>({ {<span class="num">100</span>,<span class="num">60</span>}, {<span class="num">135</span>,<span class="num">120</span>}, {<span class="num">65</span>,<span class="num">120</span>} })</code></pre>
+
+<h3>plotter.arc( cx, cy, r, start_angle, end_angle [, steps] )</h3>
+<p>
+  Draw a portion of a circle. Angles are in degrees, measured clockwise
+  from the positive X axis (consistent with Y-down screen space).
+  <code>steps</code> defaults to a value proportional to the angular span.
+</p>
+
+<pre><code><span class="cm">-- semicircle opening downward</span>
+<span class="fn">plotter.arc</span>(<span class="num">100</span>, <span class="num">100</span>, <span class="num">40</span>, <span class="num">0</span>, <span class="num">180</span>)
+
+<span class="cm">-- three-quarter arc</span>
+<span class="fn">plotter.arc</span>(<span class="num">100</span>, <span class="num">100</span>, <span class="num">40</span>, <span class="num">0</span>, <span class="num">270</span>)</code></pre>
+
+<h3>plotter.ellipse( cx, cy, rx, ry [, steps] )</h3>
+<p>
+  Draw an ellipse centred at <code>(cx, cy)</code> with horizontal radius
+  <code>rx</code> and vertical radius <code>ry</code>.
+  Unlike <code>scale() + circle()</code>, this does not affect the current
+  transform.
+</p>
+
+<pre><code><span class="fn">plotter.ellipse</span>(<span class="num">100</span>, <span class="num">100</span>, <span class="num">60</span>, <span class="num">30</span>)  <span class="cm">-- wide flat ellipse</span></code></pre>
+
+<h3>plotter.bezier( x1, y1, cx1, cy1, cx2, cy2, x2, y2 [, steps] )</h3>
+<p>
+  Draw a cubic Bézier curve from <code>(x1,&nbsp;y1)</code> to
+  <code>(x2,&nbsp;y2)</code>. <code>(cx1,&nbsp;cy1)</code> and
+  <code>(cx2,&nbsp;cy2)</code> are the control points that pull the curve.
+  <code>steps</code> defaults to 20.
+</p>
+<p>
+  The cubic Bézier formula:
+  <code>P(t) = (1-t)³P₀ + 3(1-t)²t·P₁ + 3(1-t)t²·P₂ + t³P₃</code>
+  where t runs from 0 to 1.
+</p>
+
+<pre><code><span class="cm">-- gentle S-curve</span>
+<span class="fn">plotter.bezier</span>(<span class="num">40</span>, <span class="num">150</span>,   <span class="num">40</span>, <span class="num">60</span>,   <span class="num">160</span>, <span class="num">140</span>,   <span class="num">160</span>, <span class="num">50</span>)</code></pre>
+
+<pre><code><span class="kw">local</span> advance = <span class="fn">plotter.text</span>(<span class="num">10</span>, <span class="num">50</span>, <span class="str">"Hello"</span>, <span class="num">20</span>)
+<span class="fn">plotter.text</span>(<span class="num">10</span> + advance, <span class="num">50</span>, <span class="str">" world"</span>, <span class="num">20</span>)</code></pre>
+</section>
+
+<!-- ── Pen control ── -->
+<section id="api-pen">
+<h3>plotter.penup()</h3>
+<p>
+  Lift the pen. Sends <code>M3 S&lt;pen_up&gt;</code> followed by a short dwell
+  so the servo reaches position before the next move. Has no effect if the
+  pen is already up.
+</p>
+
+<h3>plotter.pendown()</h3>
+<p>
+  Lower the pen onto the paper. Sends <code>M3 S&lt;pen_down&gt;</code> and a dwell.
+  Has no effect if the pen is already down.
+</p>
+
+<div class="note">
+  <strong>Note:</strong> The drawing primitives (<code>line</code>,
+  <code>rect</code>, etc.) manage the pen automatically — you only need
+  <code>penup()</code> and <code>pendown()</code> if you are building
+  custom motion sequences directly.
+</div>
+</section>
+
+<!-- ── done() ── -->
+<section id="api-done">
+<h3>plotter.done()</h3>
+<p>
+  Finalise output. Always call this at the end of your script.
+</p>
+<ul style="margin: 0.5rem 0 1rem 1.5rem; line-height:2">
+  <li><strong>serial / both:</strong> lifts the pen, returns to home (<code>G0 X0 Y0</code>), turns off the spindle (<code>M5</code>), closes the serial port.</li>
+  <li><strong>svg / both:</strong> writes the SVG file.</li>
+  <li><strong>gcode:</strong> writes all accumulated G-code to the output file.</li>
+</ul>
+</section>
+
+<hr>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<!-- EXAMPLES                                                                  -->
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+
+<h2 style="margin-top:1rem">Examples</h2>
+
+<!-- ── Hello world ── -->
+<section id="ex-hello">
+<h3>Hello world</h3>
+<p>
+  The simplest possible script — a border and a line of text.
+  Save as <code>examples/hello.lua</code> and run:
+</p>
+<pre><code>./luaplot examples/hello.lua</code></pre>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+
+<span class="fn">plotter.init</span> {
+    mode     = <span class="str">"svg"</span>,
+    width    = <span class="num">200</span>,
+    height   = <span class="num">200</span>,
+    svg_file = <span class="str">"hello.svg"</span>,
+}
+
+<span class="cm">-- 5 mm inset border</span>
+<span class="fn">plotter.rect</span>(<span class="num">5</span>, <span class="num">5</span>, <span class="num">190</span>, <span class="num">190</span>)
+
+<span class="cm">-- text with a cap height of 20 mm</span>
+<span class="fn">plotter.text</span>(<span class="num">20</span>, <span class="num">100</span>, <span class="str">"Hello, plotter!"</span>, <span class="num">20</span>)
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<p>
+  To send to the plotter instead of writing SVG, change <code>mode</code>
+  to <code>"serial"</code> and add the port and baud settings:
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode     = <span class="str">"serial"</span>,
+    width    = <span class="num">200</span>,
+    height   = <span class="num">200</span>,
+    port     = <span class="str">"/dev/tty.usbmodem1101"</span>,
+    baud     = <span class="num">115200</span>,
+    feed     = <span class="num">1500</span>,
+    pen_up   = <span class="num">90</span>,
+    pen_down = <span class="num">35</span>,
+}</code></pre>
+</section>
+
+<!-- ── Transform stack ── -->
+<section id="ex-transforms">
+<h3>Using the transform stack</h3>
+<p>
+  This example draws a 4×4 grid of squares, the whole grid rotated 15°
+  around its own centre. The key pattern is <code>push</code> / set up
+  transforms / draw / <code>pop</code>.
+</p>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+
+<span class="fn">plotter.init</span> { mode = <span class="str">"svg"</span>, width = <span class="num">200</span>, height = <span class="num">200</span> }
+
+<span class="cm">-- The grid is 4 columns × 4 rows of 11 mm cells (8 mm square + 3 mm gap).
+-- Total grid size: 44 mm × 44 mm.  We want it centred at (100, 100).</span>
+<span class="fn">plotter.push</span>()
+    <span class="fn">plotter.translate</span>(<span class="num">100</span>, <span class="num">100</span>)  <span class="cm">-- move origin to grid centre</span>
+    <span class="fn">plotter.rotate</span>(<span class="num">15</span>)            <span class="cm">-- rotate 15° clockwise</span>
+    <span class="fn">plotter.translate</span>(<span class="num">-22</span>, <span class="num">-22</span>)  <span class="cm">-- shift so grid is centred on origin</span>
+
+    <span class="kw">for</span> row = <span class="num">0</span>, <span class="num">3</span> <span class="kw">do</span>
+        <span class="kw">for</span> col = <span class="num">0</span>, <span class="num">3</span> <span class="kw">do</span>
+            <span class="fn">plotter.rect</span>(col * <span class="num">11</span>, row * <span class="num">11</span>, <span class="num">8</span>, <span class="num">8</span>)
+        <span class="kw">end</span>
+    <span class="kw">end</span>
+<span class="fn">plotter.pop</span>()
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<p>
+  You can nest <code>push()</code>/<code>pop()</code> pairs to any depth.
+  Each level inherits the parent transform and adds its own on top.
+</p>
+
+<pre><code><span class="cm">-- Nested transforms: outer rotation + inner per-cell variation</span>
+<span class="fn">plotter.push</span>()
+    <span class="fn">plotter.translate</span>(<span class="num">100</span>, <span class="num">100</span>)
+    <span class="fn">plotter.rotate</span>(<span class="num">15</span>)
+
+    <span class="kw">for</span> i = <span class="num">0</span>, <span class="num">7</span> <span class="kw">do</span>
+        <span class="fn">plotter.push</span>()                   <span class="cm">-- save outer transform</span>
+            <span class="fn">plotter.translate</span>(i * <span class="num">10</span>, <span class="num">0</span>)
+            <span class="fn">plotter.rotate</span>(i * <span class="num">5</span>)         <span class="cm">-- each cell rotated a bit more</span>
+            <span class="fn">plotter.rect</span>(<span class="num">-4</span>, <span class="num">-4</span>, <span class="num">8</span>, <span class="num">8</span>)
+        <span class="fn">plotter.pop</span>()                    <span class="cm">-- restore outer transform</span>
+    <span class="kw">end</span>
+<span class="fn">plotter.pop</span>()</code></pre>
+</section>
+
+<!-- ── Generative pattern ── -->
+<section id="ex-generative">
+<h3>Generative pattern</h3>
+<p>
+  Concentric rings of circles with increasing angular offset — the kind of
+  thing that takes five minutes to write but looks like it took five hours
+  to plan.
+</p>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+
+<span class="fn">plotter.init</span> {
+    mode     = <span class="str">"svg"</span>,
+    width    = <span class="num">200</span>,
+    height   = <span class="num">200</span>,
+    svg_file = <span class="str">"rings.svg"</span>,
+}
+
+<span class="kw">local</span> cx, cy  = <span class="num">100</span>, <span class="num">100</span>   <span class="cm">-- centre of the composition</span>
+<span class="kw">local</span> rings   = <span class="num">6</span>          <span class="cm">-- number of concentric rings</span>
+<span class="kw">local</span> per_ring = <span class="num">8</span>         <span class="cm">-- circles per ring</span>
+<span class="kw">local</span> r_small = <span class="num">6</span>          <span class="cm">-- radius of each small circle (mm)</span>
+
+<span class="kw">for</span> ring = <span class="num">1</span>, rings <span class="kw">do</span>
+    <span class="kw">local</span> orbit  = ring * <span class="num">13</span>             <span class="cm">-- distance from centre</span>
+    <span class="kw">local</span> offset = ring * (<span class="num">360</span> / per_ring / rings)  <span class="cm">-- angular stagger</span>
+
+    <span class="kw">for</span> i = <span class="num">0</span>, per_ring - <span class="num">1</span> <span class="kw">do</span>
+        <span class="kw">local</span> a  = math.<span class="fn">rad</span>(i * (<span class="num">360</span> / per_ring) + offset)
+        <span class="kw">local</span> px = cx + orbit * math.<span class="fn">cos</span>(a)
+        <span class="kw">local</span> py = cy + orbit * math.<span class="fn">sin</span>(a)
+        <span class="fn">plotter.circle</span>(px, py, r_small, <span class="num">24</span>)
+    <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<p>
+  To save the G-code for repeatable plotter output, change <code>mode</code>
+  to <code>"gcode"</code>:
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode       = <span class="str">"gcode"</span>,
+    width      = <span class="num">200</span>,
+    height     = <span class="num">200</span>,
+    gcode_file = <span class="str">"rings.nc"</span>,
+    feed       = <span class="num">1500</span>,
+    pen_up     = <span class="num">90</span>,
+    pen_down   = <span class="num">35</span>,
+}</code></pre>
+
+<p>
+  The resulting <code>rings.nc</code> can be sent to the plotter with any
+  GRBL-compatible G-code sender and will produce identical output every time.
+</p>
+</section>
+
+<!-- ── Text layout ── -->
+<section id="ex-text">
+<h3>Text layout</h3>
+<p>
+  <code>plotter.text()</code> returns the advance width of the string, which
+  makes it straightforward to chain calls or compute a centred position.
+</p>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+
+<span class="fn">plotter.init</span> { mode = <span class="str">"svg"</span>, width = <span class="num">200</span>, height = <span class="num">150</span> }
+
+<span class="cm">-- Chained text — second word starts where the first ends</span>
+<span class="kw">local</span> x = <span class="num">10</span>
+x = x + <span class="fn">plotter.text</span>(x, <span class="num">40</span>, <span class="str">"Hello"</span>, <span class="num">18</span>)
+x = x + <span class="fn">plotter.text</span>(x, <span class="num">40</span>, <span class="str">", "</span>, <span class="num">18</span>)
+x = x + <span class="fn">plotter.text</span>(x, <span class="num">40</span>, <span class="str">"world."</span>, <span class="num">18</span>)
+
+<span class="cm">-- Rotated text using the transform stack</span>
+<span class="fn">plotter.push</span>()
+    <span class="fn">plotter.translate</span>(<span class="num">20</span>, <span class="num">130</span>)
+    <span class="fn">plotter.rotate</span>(<span class="num">-10</span>)
+    <span class="fn">plotter.text</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="str">"Tilted label"</span>, <span class="num">12</span>)
+<span class="fn">plotter.pop</span>()
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<p>
+  To centre a string horizontally, measure it first with
+  <code>plotter.text_width()</code> then draw at the calculated position:
+</p>
+
+<pre><code><span class="kw">local</span> label   = <span class="str">"CENTRED"</span>
+<span class="kw">local</span> cap_h   = <span class="num">20</span>
+<span class="kw">local</span> start_x = <span class="num">100</span> - <span class="fn">plotter.text_width</span>(label, cap_h) / <span class="num">2</span>
+<span class="fn">plotter.text</span>(start_x, <span class="num">80</span>, label, cap_h)</code></pre>
+
+<pre><code><span class="fn">plotter.done</span>()</code></pre>
+</section>
+
+<footer>
+  luaplot &mdash; Lua 5.4 embedded, POSIX termios serial, GRBL G-code.
+  macOS and Linux only.
+</footer>
+
+</main>
+</div>
+</body>
+</html>
