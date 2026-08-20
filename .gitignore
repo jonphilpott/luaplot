@@ -1,2 +1,13 @@
-lua-src/*
-./luaplot
+# Build output
+/luaplot
+/build/
+
+# Bundled Lua source (fetched by `make fetch-lua`)
+/lua-src/
+
+# Plot output
+*.svg
+*.nc
+
+# macOS
+.DS_Store

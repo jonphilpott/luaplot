@@ -97,6 +97,15 @@
     color: #333;
   }
 
+  h4 {
+    font-family: 'Courier New', monospace;
+    font-size: 0.88rem;
+    font-weight: bold;
+    margin-top: 1.4rem;
+    margin-bottom: 0.4rem;
+    color: #555;
+  }
+
   p { margin-bottom: 1rem; }
 
   .subtitle {
@@ -259,19 +268,45 @@
   <div class="nav-section">Coordinates</div>
   <a href="#coords">Coordinate system</a>
   <a href="#transforms">Transform stack</a>
+  <a href="#points">Points &amp; vec2</a>
 
   <div class="nav-section">API reference</div>
   <a href="#api-init">init()</a>
   <a href="#api-transform">Transforms</a>
   <a href="#api-primitives">Primitives</a>
   <a href="#api-curves">Curves</a>
+  <a href="#api-shapes">Shape building</a>
+  <a href="#api-fills">Hatching &amp; fills</a>
+  <a href="#api-streamline">Streamlines</a>
   <a href="#api-pen">Pen control</a>
+  <a href="#api-paint">Painting with a brush</a>
+  <a href="#api-layers">Layers</a>
+  <a href="#api-flush">flush() &amp; real-time</a>
+  <a href="#api-optimize">Travel optimisation</a>
+  <a href="#api-introspect">Bounds &amp; stats</a>
+  <a href="#api-machine">Alarms &amp; homing</a>
+  <a href="#api-calibration">Calibration</a>
   <a href="#api-done">done()</a>
+
+  <div class="nav-section">Modules</div>
+  <a href="#mod-vec2">vec2</a>
+  <a href="#mod-noise">noise</a>
+  <a href="#mod-util">util</a>
+
+  <div class="nav-section">Tools</div>
+  <a href="#tool-servo">Finding the servo values</a>
+  <a href="#tool-pen-setup">Pen setup &amp; bed levelling</a>
+  <a href="#tool-calibrate">Calibrating steps/mm</a>
+  <a href="#tool-grbl">GRBL backup</a>
+  <a href="#tool-test">Running the tests</a>
 
   <div class="nav-section">Examples</div>
   <a href="#ex-hello">Hello world</a>
   <a href="#ex-transforms">Transform stack</a>
   <a href="#ex-generative">Generative pattern</a>
+  <a href="#ex-flowfield">Flow field</a>
+  <a href="#ex-portrait">A portrait</a>
+  <a href="#ex-brush">Brush painting</a>
   <a href="#ex-text">Text layout</a>
 </nav>
 
@@ -342,6 +377,13 @@
     </tr>
   </tbody>
 </table>
+
+<div class="note">
+  <strong><code>both</code> means serial plus SVG, not plus G-code.</strong>
+  <code>gcode_file</code> is only written in <code>gcode</code> mode — in
+  <code>both</code> the G-code goes down the wire rather than into a file. To
+  keep a copy of a live plot, run the script twice.
+</div>
 </section>
 
 <!-- ── Coordinate system ── -->
@@ -403,6 +445,39 @@ y' = c·x + d·y + ty</code></pre>
 
 <h2 style="margin-top:1rem">API reference</h2>
 <p>All functions are on the table returned by <code>require 'plotter'</code>.</p>
+
+<!-- ── Points & vec2 ── -->
+<section id="points">
+<h2>Points and vec2</h2>
+<p>
+  Anywhere luaplot expects a point you may pass either two numbers or a single
+  <a href="#mod-vec2"><code>vec2</code></a>. Plain <code>{x, y}</code> tables
+  work too, so older scripts keep running unchanged.
+</p>
+
+<pre><code><span class="fn">plotter.line</span>(<span class="num">10</span>, <span class="num">10</span>, <span class="num">90</span>, <span class="num">90</span>)
+<span class="fn">plotter.line</span>(<span class="fn">vec2</span>(<span class="num">10</span>, <span class="num">10</span>), <span class="fn">vec2</span>(<span class="num">90</span>, <span class="num">90</span>))
+
+<span class="cm">-- point lists can mix the two freely</span>
+<span class="fn">plotter.polyline</span>({ <span class="fn">vec2</span>(<span class="num">0</span>,<span class="num">0</span>), {<span class="num">10</span>,<span class="num">10</span>}, <span class="fn">vec2</span>(<span class="num">20</span>,<span class="num">0</span>) })</code></pre>
+
+<p>
+  This works because a <code>vec2</code> answers <code>v[1]</code> and
+  <code>v[2]</code> as well as <code>v.x</code> and <code>v.y</code> — it is a
+  C userdata with a metatable, not a table, but it indexes like one.
+</p>
+
+<div class="note">
+  <strong>Angles disagree between the two APIs, deliberately.</strong>
+  <code>plotter.rotate()</code> takes <strong>degrees</strong>, matching
+  Processing's sketch-level API. <code>vec2:rotate()</code> takes
+  <strong>radians</strong>, matching <code>PVector</code> and
+  <code>math.sin</code>/<code>math.cos</code>. Every angular vec2 method has a
+  <code>_deg</code> twin — <code>rotate_deg</code>, <code>heading_deg</code>,
+  <code>angle_between_deg</code>, <code>vec2.from_angle_deg</code> — so you
+  never have to convert by hand.
+</div>
+</section>
 
 <!-- ── init() ── -->
 <section id="api-init">
@@ -466,6 +541,18 @@ y' = c·x + d·y + ty</code></pre>
       <td>Spindle S value for pen-down servo position</td>
     </tr>
     <tr>
+      <td>home</td>
+      <td class="type">boolean</td>
+      <td class="default">false</td>
+      <td>If <code>true</code>, run a GRBL homing cycle (<code>$H</code>) immediately after connecting. Serial/both mode only. Blocks until homing completes (typically 10–30 s). See <a href="#api-machine">Alarms and homing</a>.</td>
+    </tr>
+    <tr>
+      <td>unlock</td>
+      <td class="type">boolean</td>
+      <td class="default">false</td>
+      <td>If <code>true</code>, clear GRBL's alarm with <code>$X</code> on connect, without homing. Nothing moves, and the drawing starts from wherever the head is parked.</td>
+    </tr>
+    <tr>
       <td>svg_file</td>
       <td class="type">string</td>
       <td class="default">"output.svg"</td>
@@ -477,6 +564,100 @@ y' = c·x + d·y + ty</code></pre>
       <td class="default">"output.nc"</td>
       <td>G-code output path (gcode mode only)</td>
     </tr>
+    <tr>
+      <td>auto_flush</td>
+      <td class="type">boolean</td>
+      <td class="default">true</td>
+      <td>Emit each primitive the moment it is drawn. Turn off for
+          <a href="#api-flush">real-time plotting</a>, where you decide the
+          batches. Forced off by <code>optimize</code>.</td>
+    </tr>
+    <tr>
+      <td>optimize</td>
+      <td class="type">boolean</td>
+      <td class="default">false</td>
+      <td>Reorder paths to cut pen-up travel. See
+          <a href="#api-optimize">Travel optimisation</a>.</td>
+    </tr>
+    <tr>
+      <td>clip</td>
+      <td class="type">string</td>
+      <td class="default">"warn"</td>
+      <td><code>"warn"</code>, <code>"clip"</code> or <code>"off"</code> —
+          what to do with geometry that falls outside the work area.</td>
+    </tr>
+    <tr>
+      <td>dot_size</td>
+      <td class="type">number</td>
+      <td class="default">0.3</td>
+      <td>Length in mm of the stroke <code>point()</code> draws.</td>
+    </tr>
+    <tr>
+      <td>quiet</td>
+      <td class="type">boolean</td>
+      <td class="default">false</td>
+      <td>Suppress the summary and warnings printed at <code>done()</code>.</td>
+    </tr>
+    <tr>
+      <td>paint_pot</td>
+      <td class="type">vec2</td>
+      <td class="default">—</td>
+      <td>Position of the default paint pot. See <a href="#api-paint">Painting with a brush</a>.</td>
+    </tr>
+    <tr>
+      <td>paint_pots</td>
+      <td class="type">table</td>
+      <td class="default">—</td>
+      <td>Named pots, e.g. <code>{ red = vec2(15,15), black = vec2(15,45) }</code>.</td>
+    </tr>
+    <tr>
+      <td>dip_time</td>
+      <td class="type">number</td>
+      <td class="default">1.0</td>
+      <td>Seconds to hold the brush down in the paint.</td>
+    </tr>
+    <tr>
+      <td>drip_time</td>
+      <td class="type">number</td>
+      <td class="default">1.0</td>
+      <td>Seconds to hold it lifted above the pot afterwards, so excess drips back in.</td>
+    </tr>
+    <tr>
+      <td>pen_dip</td>
+      <td class="type">number</td>
+      <td class="default">pen_down</td>
+      <td>Servo value for the brush down in the pot. The paint surface is usually well below the paper.</td>
+    </tr>
+    <tr>
+      <td>dip_every</td>
+      <td class="type">number</td>
+      <td class="default">off</td>
+      <td>Reload automatically after this many mm drawn.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Pen values are machine-specific.</strong> The <code>pen_up</code> /
+  <code>pen_down</code> defaults of S90 / S30 suit some other plotter's servo,
+  not necessarily yours, and a pen driven to the wrong position lands hard.
+  luaplot warns if you use serial mode without setting both.
+  <a href="#tool-calibrate">tools/calibrate.lua</a> and
+  <code>plotter.servo()</code> are how you find the right numbers.
+</div>
+
+<h3>Clipping</h3>
+<p>
+  Geometry outside the work area is a real hazard: a plotter asked to move
+  past its limits will happily try, and either lose steps or drive into its
+  own frame. <code>clip</code> decides what happens.
+</p>
+<table>
+  <thead><tr><th>Value</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td><code>"warn"</code></td><td>Draw it anyway, but print one warning to stderr naming the offending primitive. The default: noisy enough to notice, never silently alters your drawing.</td></tr>
+    <tr><td><code>"clip"</code></td><td>Trim geometry to the work area boundary. A path that leaves and re-enters comes back as several separate paths; a clipped closed shape becomes open.</td></tr>
+    <tr><td><code>"off"</code></td><td>No checking. Fastest, and correct when you are deliberately working outside the nominal area.</td></tr>
   </tbody>
 </table>
 
@@ -653,6 +834,620 @@ y' = c·x + d·y + ty</code></pre>
 </div>
 </section>
 
+<!-- ── Shape building ── -->
+<section id="api-shapes">
+<h2>Shape building</h2>
+
+<h3>plotter.point( x, y )</h3>
+<p>
+  Mark a single position. A plotter cannot draw a zero-length line — the pen
+  would go down and straight back up, leaving at best a faint dot — so this
+  draws a very short stroke instead, <code>dot_size</code> mm long.
+</p>
+
+<h3>plotter.rounded_rect( x, y, w, h, r [, steps] )</h3>
+<p>
+  A rectangle with quarter-circle corners of radius <code>r</code>.
+  <code>steps</code> is segments per corner (default 6). <code>r</code> is
+  clamped to half the shorter side, so an over-large radius gives a stadium
+  shape rather than a self-crossing mess.
+</p>
+
+<h3>plotter.regular_polygon( cx, cy, r, n [, rotation] )</h3>
+<p>
+  An <code>n</code>-sided regular polygon inscribed in a circle of radius
+  <code>r</code>. <code>rotation</code> is in degrees; the default puts a
+  vertex straight up, which is how a triangle or pentagon is normally drawn.
+</p>
+
+<h3>plotter.grid( x, y, w, h, cols, rows )</h3>
+<p>
+  A grid of <code>cols</code> × <code>rows</code> cells filling the rectangle,
+  border included. Emitted as full-length lines rather than per-cell
+  rectangles: for a 20×20 grid that is 42 pen lifts instead of 400.
+</p>
+
+<h3>plotter.begin_shape() / vertex( x, y ) / end_shape( close )</h3>
+<p>
+  Accumulate points one at a time and draw them as a single path — for when
+  the vertices come out of a loop and collecting them into a table first would
+  just be noise.
+</p>
+
+<pre><code><span class="fn">plotter.begin_shape</span>()
+<span class="kw">for</span> a = <span class="num">0</span>, <span class="num">350</span>, <span class="num">10</span> <span class="kw">do</span>
+    <span class="fn">plotter.vertex</span>(<span class="fn">vec2.from_angle_deg</span>(a) * <span class="num">40</span> + <span class="fn">vec2</span>(<span class="num">100</span>, <span class="num">100</span>))
+<span class="kw">end</span>
+<span class="fn">plotter.end_shape</span>(<span class="kw">true</span>)</code></pre>
+
+<h3>plotter.curve( points [, close [, steps [, tension]]] )</h3>
+<p>
+  A smooth curve that passes <em>through</em> every given point — Processing's
+  <code>curveVertex()</code>, a Catmull-Rom spline. Unlike
+  <code>bezier()</code>, whose control points only pull the curve toward them.
+  <code>tension</code> (default 0.5) scales the tangents: 0 gives straight
+  lines, higher values bulge more.
+</p>
+
+<h3>plotter.curve_points( points [, close [, steps [, tension]]] )</h3>
+<p>
+  The smoothed point list <code>curve()</code> would draw, <strong>returned</strong>
+  rather than drawn — the same split as <a href="#api-streamline">streamline()</a>.
+</p>
+<p>
+  This is what makes a smooth shape hatchable: <code>hatch()</code> wants a
+  polygon, and a handful of control points is not one. Sketch the outline with
+  a few points, run it through here, and fill the result.
+</p>
+<pre><code><span class="kw">local</span> outline = <span class="fn">plotter.curve_points</span>(control_pts, <span class="kw">true</span>)
+<span class="fn">plotter.hatch</span>(outline, <span class="num">45</span>, <span class="num">2</span>)
+<span class="fn">plotter.polyline</span>(outline, <span class="kw">true</span>)</code></pre>
+<p>
+  <code>tension</code> is worth knowing about when the shape carries detail:
+  the default 0.5 is a soft flowing curve, and around 0.25 keeps corners crisp
+  enough to survive. At the default, a 5&nbsp;mm scallop smooths straight back
+  into an oval.
+</p>
+
+<h3>plotter.quad_bezier( x1, y1, cx, cy, x2, y2 [, steps] )</h3>
+<p>
+  Quadratic Bézier — one control point instead of two.
+</p>
+</section>
+
+<!-- ── Hatching ── -->
+<section id="api-fills">
+<h2>Hatching and fills</h2>
+
+<h3>plotter.hatch( shape, angle, spacing [, opts] )</h3>
+<p>
+  Fill a closed shape with parallel lines. A plotter cannot fill a region — it
+  only draws strokes — so hatching is how tone and solidity get made.
+</p>
+<table>
+  <thead><tr><th>Argument</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>shape</code></td><td>A list of points, or a list of such lists. When several are given the first is the outline and the rest are holes.</td></tr>
+    <tr><td><code>angle</code></td><td>Hatch direction in degrees.</td></tr>
+    <tr><td><code>spacing</code></td><td>Distance between adjacent lines, mm.</td></tr>
+    <tr><td><code>opts.inset</code></td><td>Pull the fill in from the outline by this much (default 0).</td></tr>
+    <tr><td><code>opts.outline</code></td><td>Also stroke the shape's boundary (default false).</td></tr>
+    <tr><td><code>opts.zigzag</code></td><td>Join alternate line ends into one continuous path (default false).</td></tr>
+  </tbody>
+</table>
+
+<pre><code><span class="kw">local</span> shape = {{<span class="num">20</span>,<span class="num">20</span>}, {<span class="num">180</span>,<span class="num">20</span>}, {<span class="num">180</span>,<span class="num">180</span>}, {<span class="num">20</span>,<span class="num">180</span>}}
+<span class="kw">local</span> hole  = {{<span class="num">80</span>,<span class="num">80</span>}, {<span class="num">120</span>,<span class="num">80</span>}, {<span class="num">120</span>,<span class="num">120</span>}, {<span class="num">80</span>,<span class="num">120</span>}}
+
+<span class="fn">plotter.hatch</span>({shape, hole}, <span class="num">45</span>, <span class="num">2</span>, { outline = <span class="kw">true</span> })</code></pre>
+
+<p>
+  Concave shapes and holes come out right because crossings are paired by the
+  even-odd rule — a point is inside when a ray to it has crossed an odd number
+  of edges.
+</p>
+
+<div class="note">
+  <strong>Holes must lie inside the outline.</strong> The even-odd rule cannot
+  tell a hole from an outline, so a hole poking outside the shape it is cut
+  from gets <em>filled</em> rather than cleared — which looks like the fill has
+  leaked. If two regions need to punch each other out of a third, make them
+  adjoin rather than overlap: two overlapping holes fill their intersection
+  back in for the same reason.
+</div>
+
+<div class="note">
+  <strong>Use <code>zigzag</code> on dense fills.</strong> Without it every
+  scanline is a separate path costing its own pen lift, and a tightly hatched
+  shape can spend most of its time lifting rather than drawing. With it,
+  alternate lines are joined end to end into a single continuous path — one
+  lift for the whole fill. It only applies where a scanline has exactly one
+  span, so a shape that splits around a hole still breaks the path there
+  rather than drawing across the gap.
+</div>
+</section>
+
+<!-- ── Streamlines ── -->
+<section id="api-streamline">
+<h2>Streamlines</h2>
+
+<h3>plotter.streamline( start, field_fn, steps, step_len [, opts] ) → points</h3>
+<p>
+  Trace a path through a vector field and <strong>return</strong> the points.
+  It does not draw anything, so you can trim, filter or thin the result before
+  handing it to <code>polyline()</code>.
+</p>
+<p>
+  <code>field_fn(p)</code> is called with a <code>vec2</code> and must return a
+  direction: a <code>vec2</code>, an <code>{x, y}</code> table, or two numbers.
+  Magnitude is ignored — only direction — so a field of wildly varying strength
+  still advances at a steady <code>step_len</code>.
+</p>
+<table>
+  <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>opts.stop</code></td><td>Predicate called with the current point; return true to end the trace early.</td></tr>
+    <tr><td><code>opts.min_mag</code></td><td>Give up where the field goes slack (default 1e-9).</td></tr>
+  </tbody>
+</table>
+
+<pre><code><span class="kw">local function</span> <span class="fn">field</span>(p)
+    <span class="kw">local</span> a = <span class="fn">noise.fbm</span>(p.x * <span class="num">0.01</span>, p.y * <span class="num">0.01</span>) * math.pi * <span class="num">2</span>
+    <span class="kw">return</span> <span class="fn">vec2.from_angle</span>(a)
+<span class="kw">end</span>
+
+<span class="fn">plotter.polyline</span>(<span class="fn">plotter.streamline</span>(<span class="fn">vec2</span>(<span class="num">10</span>, <span class="num">10</span>), field, <span class="num">200</span>, <span class="num">1.5</span>))</code></pre>
+
+<p>
+  Integration is midpoint (RK2), not Euler: the field is sampled, a half step
+  taken, and the field sampled again before committing. Euler visibly spirals
+  outward on curved fields, which on paper reads as drift rather than flow.
+</p>
+<p>
+  See <a href="#ex-flowfield">the flow field example</a> for the full
+  technique, including keeping neighbouring lines from converging into a blot.
+</p>
+</section>
+
+<!-- ── Painting ── -->
+<section id="api-paint">
+<h2>Painting with a brush</h2>
+<p>
+  A brush holds a finite amount of paint, so a painting is a sequence of
+  strokes punctuated by trips back to a pot on the bed. luaplot models the pot
+  as a fixed position and the reload as a queued action.
+</p>
+
+<h3>plotter.pot( name, x, y )</h3>
+<p>
+  Register a paint pot. The two-argument forms —
+  <code>plotter.pot(x, y)</code> or <code>plotter.pot(vec2)</code> — register
+  the default pot, used when <code>dip()</code> is called with no name.
+  Pots can also be declared up front as <code>paint_pot</code> /
+  <code>paint_pots</code> in <code>init()</code>.
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode      = <span class="str">"serial"</span>,
+    port      = port,
+    pen_up    = <span class="num">0</span>,
+    pen_down  = <span class="num">150</span>,
+
+    paint_pot = <span class="fn">vec2</span>(<span class="num">15</span>, <span class="num">15</span>),
+    pen_dip   = <span class="num">175</span>,      <span class="cm">-- the paint is deeper than the paper</span>
+    dip_time  = <span class="num">1.5</span>,      <span class="cm">-- seconds in the paint</span>
+    drip_time = <span class="num">2.0</span>,      <span class="cm">-- seconds above the pot, letting excess fall back</span>
+}
+
+<span class="cm">-- or several, named</span>
+<span class="fn">plotter.pot</span>(<span class="str">"red"</span>,   <span class="fn">vec2</span>(<span class="num">15</span>, <span class="num">15</span>))
+<span class="fn">plotter.pot</span>(<span class="str">"black"</span>, <span class="fn">vec2</span>(<span class="num">15</span>, <span class="num">45</span>))</code></pre>
+
+<div class="note">
+  <strong>Pot positions are absolute and the transform stack never touches
+  them.</strong> The pot is a physical object bolted to the bed: it does not
+  move because your drawing is translated, rotated or scaled. Both
+  <code>pot()</code> and <code>dip()</code> bypass the stack entirely, so a dip
+  inside a <code>push()</code>/<code>pop()</code> block still goes to the same
+  place. A dip that went through the transform would end up somewhere else on
+  the bed, at rapid speed.
+</div>
+
+<h3>plotter.dip( name, opts )</h3>
+<p>
+  Reload the brush. Both arguments are optional. The sequence is:
+</p>
+<ol>
+  <li>pen up</li>
+  <li>rapid to the pot</li>
+  <li>pen down into the paint (<code>pen_dip</code>)</li>
+  <li>wait <code>dip_time</code></li>
+  <li>pen up</li>
+  <li>wait <code>drip_time</code>, so excess paint drips back into the pot</li>
+</ol>
+
+<pre><code><span class="fn">plotter.dip</span>()
+<span class="fn">plotter.dip</span>(<span class="str">"red"</span>)
+<span class="fn">plotter.dip</span>(<span class="str">"red"</span>, { dip_time = <span class="num">3</span>, drip_time = <span class="num">2</span> })
+<span class="fn">plotter.dip</span>({ pen_dip = <span class="num">180</span> })      <span class="cm">-- deeper, default pot</span></code></pre>
+
+<p>
+  <code>opts</code> overrides <code>dip_time</code>, <code>drip_time</code> or
+  <code>pen_dip</code> for one dip — a thin wash wants a shorter soak than
+  thick acrylic, and the first dip of a session often wants a longer one to
+  prime dry bristles.
+</p>
+
+<p>Which produces:</p>
+<pre><code>G0 X15.000 Y185.000     <span class="cm">; travel to the pot, brush clear</span>
+M3 S175                 <span class="cm">; down into the paint</span>
+G4 P1.500               <span class="cm">; dip_time</span>
+M3 S0                   <span class="cm">; lift out</span>
+G4 P2.000               <span class="cm">; drip_time, over the pot</span></code></pre>
+
+<div class="note">
+  <strong>The second wait is the one people leave out.</strong> A brush comes
+  out of the pot loaded and dripping. Lifting and immediately traversing to the
+  drawing flings paint across the page; waiting over the pot lets the excess
+  fall back where it belongs.
+</div>
+
+<h3>Dips keep their place in the sequence</h3>
+<p>
+  <code>dip()</code> does not fire immediately. Like a stroke, it is queued in
+  the <a href="#api-flush">path buffer</a>, because a dip is an ordered event —
+  "these strokes get this load of paint" only means anything if the dip stays
+  put relative to the strokes around it.
+</p>
+<p>
+  It follows that a dip is a <strong>hard barrier for the
+  <a href="#api-optimize">travel optimiser</a></strong>. Paths are freely
+  reordered between two dips, never across one. After a dip the pen is at the
+  pot, and the optimiser picks up from there.
+</p>
+
+<h3>Automatic reloading</h3>
+<p>
+  Set <code>dip_every</code> to a distance in mm and luaplot tops the brush up
+  before any stroke that would run past that budget. A manual
+  <code>dip()</code> resets the budget.
+</p>
+
+<pre><code><span class="fn">plotter.init</span> { <span class="cm">...</span> paint_pot = <span class="fn">vec2</span>(<span class="num">15</span>, <span class="num">15</span>), dip_every = <span class="num">120</span> }
+
+<span class="cm">-- reloads happen on their own, between strokes, never mid-stroke</span>
+<span class="fn">plotter.hatch</span>(shape, <span class="num">45</span>, <span class="num">3</span>)</code></pre>
+
+<p>
+  The decision is made when the stroke is recorded, not when it is emitted, so
+  it does not shift when paths are reordered — drawn length is the same either
+  way, travel is not.
+</p>
+<p>
+  An automatic reload goes back to <strong>the pot you last dipped</strong>, so
+  a top-up is the same colour as the paint already on the brush. Failing that
+  the default pot, and failing that the only pot there is. A bare
+  <code>dip()</code> follows the same rule, so it will not silently jump back
+  to the default half way through a two-colour painting.
+</p>
+<p>
+  A stroke longer than the whole budget cannot be helped by reloading — the
+  path would have to be split, which would change the drawing — so it is drawn
+  as-is and luaplot warns once that it may run dry. It will not dip twice in a
+  row on a brush that was only just loaded.
+</p>
+
+<h3>Reloads in the plot summary</h3>
+<p>
+  <code>plotter.stats()</code> gains <code>dips</code> and
+  <code>dwell_min</code>, and <code>minutes</code> includes the waiting. That
+  matters: at a second in the pot and a second dripping, a painting reloading
+  every 50 mm can spend longer waiting than drawing.
+</p>
+
+<pre><code>318 paths  |  4210 mm drawn  |  1870 mm travel  |  36 dips (1.2 min)  |  ~7.3 min</code></pre>
+
+<p>
+  Dips are excluded from <code>plotter.paths()</code> and from
+  <code>plotter.bounds()</code> — a pot is hardware, not artwork, and should
+  not stretch the bounding box. <code>plotter.queue()</code> returns strokes
+  and dips together in emission order, each tagged with a <code>kind</code> of
+  <code>"path"</code> or <code>"dip"</code>.
+</p>
+</section>
+
+<!-- ── Layers ── -->
+<section id="api-layers">
+<h2>Layers</h2>
+
+<h3>plotter.layer( name )</h3>
+<p>
+  Tag everything drawn from here on as belonging to a named layer.
+  <code>plotter.layer(nil)</code> returns to the unnamed default.
+</p>
+<ul>
+  <li><strong>SVG</strong> — each layer becomes a <code>&lt;g&gt;</code> with
+      its own stroke colour, so you can see the separation on screen.</li>
+  <li><strong>Serial / G-code</strong> — the pen is parked and you are
+      prompted on stdin to swap pens when the plot crosses a layer boundary.
+      This is how a single-pen plotter draws in more than one colour.</li>
+  <li><strong>Optimisation</strong> — paths are never reordered across a layer
+      boundary, so layers double as barriers for the travel optimiser.</li>
+</ul>
+
+<pre><code><span class="fn">plotter.layer</span>(<span class="str">"outline"</span>)
+<span class="fn">plotter.rect</span>(<span class="num">10</span>, <span class="num">10</span>, <span class="num">180</span>, <span class="num">180</span>)
+
+<span class="fn">plotter.layer</span>(<span class="str">"shading"</span>)   <span class="cm">-- prompts for a pen change on hardware</span>
+<span class="fn">plotter.hatch</span>(shape, <span class="num">45</span>, <span class="num">2</span>)</code></pre>
+</section>
+
+<!-- ── flush ── -->
+<section id="api-flush">
+<h2>flush() and real-time plotting</h2>
+
+<h3>plotter.flush()</h3>
+<p>
+  Emit every path buffered since the last flush and clear the pending set. The
+  session stays open — the serial port is not closed and you can keep drawing.
+  Safe to call any number of times, including when nothing is pending.
+</p>
+<p>
+  Primitives do not write G-code directly. They transform their points into
+  world space and append to a path buffer; <code>flush()</code> is what turns
+  buffered paths into output. By default <code>auto_flush</code> is on and
+  every primitive flushes immediately, so scripts behave exactly as they always
+  did.
+</p>
+<p>
+  Turning it off is what makes a plot that <em>builds up over time</em>
+  possible — reacting to a sensor, a network feed, or anything else that
+  arrives while the pen is still on the paper:
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode       = <span class="str">"serial"</span>,
+    port       = port,
+    auto_flush = <span class="kw">false</span>,
+}
+
+<span class="kw">while</span> running <span class="kw">do</span>
+    <span class="fn">plotter.polyline</span>(<span class="fn">read_sensor</span>())
+    <span class="fn">plotter.flush</span>()      <span class="cm">-- this batch goes to the pen; session stays live</span>
+<span class="kw">end</span>
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<p>
+  In svg/both mode each flush rewrites the SVG with everything accumulated so
+  far, so you can watch the file grow in a browser that reloads.
+</p>
+
+<div class="note">
+  <strong>flush() versus done().</strong> <code>flush()</code> emits and keeps
+  going. <code>done()</code> emits, parks the pen, writes the output files and
+  closes the port. Use <code>flush()</code> in a loop.
+  <code>done()</code> is idempotent, so calling it more than once is harmless,
+  and <code>plotter.done { keep_open = true }</code> gives you the park and the
+  file write without closing the port.
+</div>
+</section>
+
+<!-- ── Optimisation ── -->
+<section id="api-optimize">
+<h2>Travel optimisation</h2>
+<p>
+  Set <code>optimize = true</code> in <code>init()</code> and luaplot reorders
+  buffered paths before emitting them, so the pen spends less time moving
+  between strokes with nothing to draw.
+</p>
+<p>
+  Pen-up travel is pure overhead, and it dominates far more often than people
+  expect: a stipple or contour plot generated in scan order can easily spend
+  more time in the air than on the paper. On a scattered test of 200 short
+  strokes, reordering cut travel by around 90%.
+</p>
+<p>
+  The algorithm is greedy nearest-neighbour from the pen's current position,
+  reversing a path when its far end is the closer entry point. Not optimal, but
+  O(n²) with a tiny constant and it removes most of the waste.
+</p>
+<ul>
+  <li>Reordering never crosses a <a href="#api-layers">layer</a> boundary.</li>
+  <li>Closed paths are reversed but never rotated to a different start vertex —
+      that would move the seam where the pen sets down and lifts, which is
+      visible on paper.</li>
+  <li><code>optimize</code> forces <code>auto_flush</code> off: paths have to
+      be held back before they can be reordered. Each <code>flush()</code>
+      optimises one batch, picking up from where the pen actually is.</li>
+</ul>
+</section>
+
+<!-- ── Introspection ── -->
+<section id="api-introspect">
+<h2>Bounds and statistics</h2>
+
+<h3>plotter.bounds() → min, max</h3>
+<p>
+  The bounding box of everything drawn so far, as two <code>vec2</code>.
+  Returns <code>nil</code> if nothing has been drawn.
+</p>
+
+<h3>plotter.stats() → table</h3>
+<p>
+  What the plot costs. Also printed at <code>done()</code> unless
+  <code>quiet</code> is set.
+</p>
+<table>
+  <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>paths</code></td><td>Number of separate strokes — equivalently, pen lifts.</td></tr>
+    <tr><td><code>draw_mm</code></td><td>Distance drawn with the pen down.</td></tr>
+    <tr><td><code>travel_mm</code></td><td>Distance moved with the pen up. Pure overhead.</td></tr>
+    <tr><td><code>dips</code></td><td>Number of <a href="#api-paint">brush reloads</a>.</td></tr>
+    <tr><td><code>dwell_min</code></td><td>Time spent waiting in and over the paint pot.</td></tr>
+    <tr><td><code>minutes</code></td><td>Rough total: movement at the configured feed rate, plus dwell.</td></tr>
+  </tbody>
+</table>
+
+<h3>plotter.paths()</h3>
+<p>
+  Every path drawn since <code>init()</code>, in world space, as
+  <code>{ {pts = {{x,y}, ...}, close = bool, layer = name}, ... }</code>.
+  Returned live rather than copied, so treat it as read-only. Useful for
+  post-processing your own geometry — and with <code>optimize</code> on it
+  reflects the order the plot was actually drawn in.
+</p>
+</section>
+
+<!-- ── Machine state ── -->
+<section id="api-machine">
+<h2>Alarms and homing</h2>
+<p>
+  GRBL boots into an <strong>alarm state</strong> whenever homing is enabled
+  (<code>$22=1</code>) and refuses every G-code word until it is told where the
+  machine is. This is not an edge case — it is what happens on the first run
+  after the controller powers up, and the failure looks like
+  <code>error:9</code> on an innocent command.
+</p>
+<p>
+  So a serial script has to say which it wants:
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode = <span class="str">"serial"</span>,
+    port = port,
+    home = <span class="kw">true</span>,      <span class="cm">-- $H: drive into the limit switches, known position</span>
+}
+
+<span class="fn">plotter.init</span> {
+    mode   = <span class="str">"serial"</span>,
+    port   = port,
+    unlock = <span class="kw">true</span>,    <span class="cm">-- $X: clear the alarm, move nothing</span>
+}</code></pre>
+
+<p>
+  Without either, <code>init()</code> checks and fails with a message naming
+  both options rather than letting the preamble hit a bare error code.
+</p>
+
+<h3>plotter.home()</h3>
+<p>
+  Run a homing cycle. Blocks until GRBL answers, which it does only once the
+  cycle finishes — routinely 10 to 30 seconds — so the reply timeout is raised
+  for the duration. Needs <code>$22=1</code>; GRBL answers
+  <code>error:5</code> otherwise.
+</p>
+
+<h3>plotter.unlock()</h3>
+<p>
+  Clear the alarm without homing. Nothing moves, which makes it safe to call
+  blind, but GRBL is left with no idea where the machine is.
+</p>
+<p>
+  That suits luaplot's coordinate model, which zeroes the work origin wherever
+  the head is sitting (the <code>G92</code> in the init preamble) — park the
+  head where the drawing should start, unlock, and plot. It does not suit
+  anything relying on machine coordinates or soft limits.
+</p>
+
+<h3>plotter.is_locked()</h3>
+<p>
+  Whether GRBL is currently refusing G-code. Probed with <code>G4 P0</code>, a
+  zero-length dwell: harmless if accepted, <code>error:9</code> if not. The
+  obvious probe — the <code>?</code> status query — is a realtime command that
+  never answers <code>ok</code>, so it would hang until the timeout.
+</p>
+
+<div class="note">
+  <strong>A slow plot is not a hung plot.</strong> GRBL acknowledges most
+  commands as soon as they are parsed into its planner buffer, but the
+  synchronising ones — <code>M3</code>/<code>M5</code> pen moves,
+  <code>G4</code> dwells, <code>$H</code> — are not answered until every queued
+  move has physically finished. A pen lift after a 200&nbsp;mm path at
+  600&nbsp;mm/min legitimately leaves the port silent for twenty seconds.
+  <br><br>
+  So luaplot's reply timeout measures <em>liveness</em>, not speed: when the
+  port goes quiet it sends <code>?</code>, a realtime status query GRBL answers
+  from an interrupt whatever the planner is doing. An answer resets the clock.
+  Only silence that survives repeated probes is treated as a dead machine. An
+  <code>Alarm</code> appearing in a status report fails immediately, since the
+  <code>ok</code> is never coming; a <code>Hold</code> or <code>Door</code>
+  pause is reported once and then waited out.
+</div>
+
+<div class="note">
+  <strong>Closing the port used to reset the controller.</strong> Dropping DTR
+  on close reboots any Arduino-style board, so each run found GRBL freshly
+  booted and alarmed — a homing cycle per plot. luaplot now clears
+  <code>HUPCL</code>, leaving DTR asserted through the close, so the controller
+  keeps running between invocations: <strong>home once, then plot as often as
+  you like</strong>. The first connection after the board powers up still
+  resets, since DTR has to be asserted from idle at some point.
+</div>
+</section>
+
+<!-- ── Calibration ── -->
+<section id="api-calibration">
+<h3>plotter.moveto( x, y )</h3>
+<p>
+  Rapid-move (<code>G0</code>) to an absolute position in Lua drawing
+  coordinates (Y-down, origin top-left). <strong>Does not move the pen</strong>
+  — call <code>penup()</code> or <code>pendown()</code> before or after as
+  needed. The current transform stack is not applied — coordinates are always
+  relative to the work area origin.
+</p>
+<p>
+  Only meaningful in <code>serial</code> or <code>both</code> mode; no-op
+  otherwise.
+</p>
+
+<pre><code><span class="cm">-- lift pen, reposition, lower pen</span>
+<span class="fn">plotter.penup</span>()
+<span class="fn">plotter.moveto</span>(<span class="num">100</span>, <span class="num">100</span>)
+<span class="fn">plotter.pendown</span>()
+
+<span class="cm">-- drag (move with pen already down)</span>
+<span class="fn">plotter.pendown</span>()
+<span class="fn">plotter.moveto</span>(<span class="num">50</span>, <span class="num">50</span>)</code></pre>
+
+<h3>plotter.servo( s )</h3>
+<p>
+  Send a raw servo position command <code>M3 S<em>s</em></code> with an
+  arbitrary value. Use this during calibration to sweep the servo and find
+  the correct pen-down height before committing the value to
+  <code>pen_down</code> in your <code>init()</code> config. Typical hobby
+  servos wired to GRBL accept values in the range 0–180.
+</p>
+<p>
+  Only meaningful in <code>serial</code> or <code>both</code> mode; no-op
+  otherwise.
+</p>
+
+<pre><code><span class="cm">-- sweep the servo to find the right pen-down height</span>
+<span class="fn">plotter.penup</span>()
+<span class="fn">plotter.moveto</span>(<span class="num">100</span>, <span class="num">100</span>)   <span class="cm">-- position over paper</span>
+<span class="fn">plotter.servo</span>(<span class="num">60</span>)           <span class="cm">-- try this height</span>
+<span class="cm">-- pen too high? lower it:</span>
+<span class="fn">plotter.servo</span>(<span class="num">45</span>)
+<span class="cm">-- once happy, set pen_down = 45 in plotter.init()</span></code></pre>
+
+<div class="note">
+  <strong>Finding your pen values:</strong> set <code>home = true</code> in
+  <code>init()</code>, use <code>moveto()</code> to position the head over
+  your paper, then use <code>servo()</code> to find the right pen-down value.
+  Once you have it, store it as <code>pen_down</code> and remove the
+  calibration calls.
+</div>
+
+<div class="note">
+  <strong>Distances wrong rather than the pen?</strong> If a 100 mm line
+  measures 98 mm, that is GRBL's steps-per-mm, not anything in your script.
+  <a href="#tool-calibrate">tools/calibrate.lua</a> measures and fixes it, and
+  <a href="#tool-grbl">tools/grbl-config.lua</a> backs the settings up first.
+</div>
+</section>
+
 <!-- ── done() ── -->
 <section id="api-done">
 <h3>plotter.done()</h3>
@@ -673,6 +1468,487 @@ y' = c·x + d·y + ty</code></pre>
 <!-- ══════════════════════════════════════════════════════════════════════════ -->
 
 <h2 style="margin-top:1rem">Examples</h2>
+
+<!-- ── vec2 ── -->
+<section id="mod-vec2">
+<h2>vec2</h2>
+<p>
+  A 2D vector type modelled on Processing's <code>PVector</code>, implemented
+  in C as a userdata with a metatable. It is available as a global and through
+  <code>require 'vec2'</code> — the two give the same table.
+</p>
+
+<pre><code><span class="kw">local</span> v = <span class="fn">vec2</span>(<span class="num">3</span>, <span class="num">4</span>)
+<span class="kw">local</span> w = <span class="fn">vec2</span>(<span class="num">1</span>, <span class="num">0</span>)
+
+v + w          <span class="cm">--&gt; vec2(4.000, 4.000)</span>
+v * <span class="num">2</span>          <span class="cm">--&gt; vec2(6.000, 8.000)</span>
+v * w          <span class="cm">--&gt; vec2(3.000, 0.000)  component-wise</span>
+-v             <span class="cm">--&gt; vec2(-3.000, -4.000)</span>
+#v             <span class="cm">--&gt; 5.0  (magnitude)</span>
+v.x, v[<span class="num">1</span>]     <span class="cm">--&gt; 3.0, 3.0  (same storage)</span></code></pre>
+
+<h3>Mutability</h3>
+<p>
+  This follows <code>PVector</code> exactly, because the surprise otherwise is
+  worse than the inconsistency:
+</p>
+<table>
+  <thead><tr><th>Form</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr><td><code>v:add(w)</code></td><td>Instance methods <strong>mutate</strong> the receiver and return it, so they chain: <code>v:add(w):limit(10)</code>.</td></tr>
+    <tr><td><code>vec2.add(v, w)</code></td><td>Module functions return a <strong>new</strong> vector, leaving their arguments alone.</td></tr>
+    <tr><td><code>v + w</code></td><td>Operators always return a new vector.</td></tr>
+  </tbody>
+</table>
+
+<h3>Constructors</h3>
+<table>
+  <thead><tr><th>Function</th><th>Returns</th></tr></thead>
+  <tbody>
+    <tr><td><code>vec2(x, y)</code> / <code>vec2.new(x, y)</code></td><td>Both components default to 0.</td></tr>
+    <tr><td><code>vec2.from_angle(rad [, len])</code></td><td>A vector at that angle. <code>from_angle_deg</code> for degrees.</td></tr>
+    <tr><td><code>vec2.random2d([len])</code></td><td>Uniform random direction. Drawn from <code>math.random</code>, so <code>math.randomseed</code> reproduces it.</td></tr>
+    <tr><td><code>vec2.zero()</code></td><td>The origin.</td></tr>
+    <tr><td><code>vec2.is_vec2(v)</code></td><td>True for a vec2, false for a table.</td></tr>
+  </tbody>
+</table>
+
+<h3>Methods that mutate</h3>
+<p>
+  <code>set</code> · <code>add</code> · <code>sub</code> · <code>mult</code> ·
+  <code>div</code> · <code>normalize</code> · <code>limit</code> ·
+  <code>set_mag</code> · <code>rotate</code> · <code>rotate_deg</code> ·
+  <code>lerp</code>
+</p>
+<p>
+  <code>add</code> and <code>sub</code> also accept two numbers:
+  <code>v:add(2, 3)</code>.
+</p>
+
+<h3>Methods that do not</h3>
+<p>
+  <code>copy</code> · <code>mag</code> · <code>mag_sq</code> ·
+  <code>dot</code> · <code>cross</code> · <code>dist</code> ·
+  <code>dist_sq</code> · <code>heading</code> · <code>heading_deg</code> ·
+  <code>angle_between</code> · <code>angle_between_deg</code> ·
+  <code>normalized</code> · <code>perp</code> · <code>unpack</code> ·
+  <code>array</code>
+</p>
+<p>
+  <code>cross</code> in 2D returns the scalar z component of the 3D cross
+  product; its sign tells you which side the other vector is on.
+  <code>perp</code> is the vector rotated 90°, handy for offsetting a path
+  sideways.
+</p>
+
+<h3>Module functions</h3>
+<p>
+  <code>vec2.add</code> · <code>sub</code> · <code>mult</code> ·
+  <code>div</code> · <code>dist</code> · <code>dot</code> ·
+  <code>cross</code> · <code>lerp</code> · <code>angle_between</code> ·
+  <code>angle_between_deg</code>
+</p>
+
+<div class="note">
+  <strong>Processing snippets port unchanged.</strong> The camelCase spellings
+  are registered as aliases: <code>magSq</code>, <code>setMag</code>,
+  <code>distSq</code>, <code>angleBetween</code>, <code>fromAngle</code>,
+  <code>random2D</code>, <code>isVec2</code>.
+</div>
+</section>
+
+<!-- ── noise ── -->
+<section id="mod-noise">
+<h2>noise</h2>
+<p>
+  Perlin and Worley noise, in C because noise is usually evaluated across a
+  grid — one call per cell per octave. Available as a global and through
+  <code>require 'noise'</code>.
+</p>
+
+<pre><code><span class="fn">noise.seed</span>(<span class="num">42</span>)
+
+<span class="fn">noise.perlin</span>(x, y)                            <span class="cm">--&gt; -1 .. 1</span>
+<span class="fn">noise.fbm</span>(x, y, { octaves = <span class="num">5</span>, gain = <span class="num">0.55</span> })
+<span class="kw">local</span> f1, f2, id = <span class="fn">noise.worley</span>(x, y)</code></pre>
+
+<table>
+  <thead><tr><th>Function</th><th>Range</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td><code>noise.seed(n)</code></td><td>—</td><td>Reseed the field. Default seed is 0, so output is reproducible even if you never call it.</td></tr>
+    <tr><td><code>noise.perlin(x [, y [, z]])</code></td><td>−1 … 1</td><td>Improved Perlin (2002). Also callable as <code>noise(x, y)</code>.</td></tr>
+    <tr><td><code>noise.fbm(…, opts)</code></td><td>−1 … 1</td><td>Octaves summed at rising frequency and falling amplitude.</td></tr>
+    <tr><td><code>noise.turbulence(…, opts)</code></td><td>0 … 1</td><td>Absolute value per octave — billowy creases.</td></tr>
+    <tr><td><code>noise.ridged(…, opts)</code></td><td>0 … 1</td><td>Inverted creases — sharp eroded crests.</td></tr>
+    <tr><td><code>noise.worley(x, y [, z] [, opts])</code></td><td>f1, f2, id</td><td>Cellular. See below.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  The fractal variants take <code>octaves</code> (4), <code>lacunarity</code>
+  (2.0) and <code>gain</code> (0.5).
+</p>
+
+<h3>Worley / cellular</h3>
+<p>
+  Returns the distance to the nearest feature point (<code>f1</code>), the
+  second nearest (<code>f2</code>), and a stable integer id for the winning
+  cell. <code>f2 - f1</code> is near zero exactly on a cell boundary, which is
+  how you draw the classic cracked-mud web; <code>cell_id</code> lets you make
+  a per-cell decision that stays put as you sample around inside the cell.
+</p>
+<p>
+  <code>opts.jitter</code> (0–1, default 1) is how far feature points stray
+  from their cell centre; <code>opts.metric</code> is
+  <code>"euclidean"</code> (default), <code>"manhattan"</code> or
+  <code>"chebyshev"</code>.
+</p>
+
+<h3>Processing compatibility</h3>
+<p>
+  <code>noise.noise()</code>, <code>noise.noise_detail()</code> and
+  <code>noise.noise_seed()</code> mirror Processing's interface, parameter
+  meanings and 0–1 output range, so sketches port without rescaling.
+  <code>noiseDetail</code> and <code>noiseSeed</code> work too.
+</p>
+<div class="note">
+  <strong>Not bit-identical to Processing.</strong> Processing's
+  <code>noise()</code> is value noise; this is Perlin. The character of the
+  field is the same, the exact numbers are not.
+</div>
+
+<div class="note">
+  <strong>Noise seeding is separate from <code>math.randomseed</code>.</strong>
+  That is deliberate: you usually want to re-roll a sketch's random scatter
+  while holding its noise field still, or the other way round.
+</div>
+</section>
+
+<!-- ── util ── -->
+<section id="mod-util">
+<h2>util</h2>
+<p>
+  <code>local util = require 'util'</code> — the small functions every
+  generative sketch otherwise rewrites. Pure Lua.
+</p>
+
+<h3>Processing maths</h3>
+<table>
+  <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>map(v, lo1, hi1, lo2, hi2)</code></td><td>Re-range a value. Does not clamp, so values outside the source range map outside the target range.</td></tr>
+    <tr><td><code>lerp(a, b, t)</code> / <code>norm(v, lo, hi)</code></td><td>Interpolate, and its inverse.</td></tr>
+    <tr><td><code>constrain(v, lo, hi)</code></td><td>Clamp.</td></tr>
+    <tr><td><code>wrap(v, lo, hi)</code></td><td>Wrap into <code>[lo, hi)</code> — correct for negatives, unlike bare modulo.</td></tr>
+    <tr><td><code>smoothstep</code> / <code>smootherstep</code></td><td>Clamped 0–1 ramps with flat ends.</td></tr>
+    <tr><td><code>round</code> · <code>sign</code> · <code>dist</code></td><td></td></tr>
+  </tbody>
+</table>
+
+<h3>Random</h3>
+<p>
+  All built on <code>math.random</code>, so one <code>math.randomseed(n)</code>
+  reproduces a whole sketch.
+</p>
+<table>
+  <thead><tr><th>Function</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>random_range([lo,] hi)</code></td><td>A uniform float.</td></tr>
+    <tr><td><code>random_gaussian([mean [, sd]])</code></td><td>Normally distributed. Reads as hand-drawn where uniform jitter reads as noise.</td></tr>
+    <tr><td><code>random_choice(list)</code></td><td>One element, uniformly.</td></tr>
+    <tr><td><code>random_weighted(list, weights)</code></td><td>One element, with probability proportional to its weight.</td></tr>
+    <tr><td><code>shuffle(list)</code></td><td>Fisher-Yates, in place, returns the list.</td></tr>
+  </tbody>
+</table>
+
+<h3>Point distributions</h3>
+
+<h4>util.poisson_disk( w, h, r [, k] )</h4>
+<p>
+  Blue-noise scatter: points spread randomly over a <code>w × h</code> area but
+  never closer than <code>r</code> to each other. This is the right way to
+  stipple. Uniform random points clump — dense knots and bare patches, which on
+  paper reads as a mistake. Poisson disk has the same irregularity without the
+  clumping.
+</p>
+<p>
+  Bridson's algorithm, linear in the number of points. <code>k</code> is how
+  many placements to try around each point before giving up on it (default 30).
+</p>
+
+<div class="note">
+  <strong>Getting variable density out of it.</strong> Generate the scatter at
+  the finest spacing you want anywhere, then keep each point with probability
+  equal to the darkness there. The survivors inherit blue noise's evenness, so
+  a gradient reads as tone rather than texture. See
+  <code>examples/stipple.lua</code>.
+</div>
+
+<h4>util.grid( w, h, cols, rows )</h4>
+<p>
+  An evenly spaced lattice with points <em>on</em> the edges: the first is
+  (0, 0), the last is (w, h). Row-major, running along x first, so stepping
+  through it in order reads left to right then up. That predictability is the
+  point — <a href="#tool-pen-setup">tools/pen-setup.lua</a> walks this grid with
+  a person watching each move.
+</p>
+
+<h4>util.halton( i, base ) and util.halton2d( n [, w [, h]] )</h4>
+<p>
+  A low-discrepancy sequence: even coverage at every prefix length, without
+  being a visible lattice. Unlike <code>poisson_disk</code> you can ask for one
+  more point at any time without recomputing.
+</p>
+
+<p>
+  camelCase aliases: <code>randomGaussian</code>, <code>randomRange</code>,
+  <code>randomChoice</code>, <code>randomWeighted</code>,
+  <code>smoothStep</code>, <code>poissonDisk</code>.
+</p>
+</section>
+
+<!-- ── Servo sweep ── -->
+<section id="tool-servo">
+<h2>Finding the servo values</h2>
+<p>
+  The first thing to run on a new machine. Everything else needs
+  <code>pen_up</code> and <code>pen_down</code>:
+  <a href="#tool-pen-setup">pen-setup.lua</a> and
+  <a href="#tool-calibrate">calibrate.lua</a> both refuse to run without them,
+  and <code>init()</code> warns if you plot in serial mode without setting
+  them, because the built-in defaults suit some other machine's servo.
+</p>
+
+<pre><code>$ ./luaplot tools/servo-sweep.lua /dev/cu.usbmodem1101
+
+S&gt; 90
+  sent M3 S90
+S&gt; 30
+  sent M3 S30</code></pre>
+
+<div class="note">
+  <strong>Run it with no pen fitted.</strong> You are looking for two
+  positions, and a pen in the holder while you sweep is the one thing in reach
+  that can be damaged. Fit the pen afterwards with
+  <a href="#tool-pen-setup">pen-setup.lua</a>, which lowers the holder first so
+  you can set the height against real paper.
+</div>
+
+<p>
+  It sends raw serial on purpose — no preamble, no <code>G92</code>, no motion
+  of any kind. The only thing that goes down the wire is
+  <code>M3 S&lt;value&gt;</code>, and nothing is written to EEPROM, so there is
+  nothing to undo.
+</p>
+</section>
+
+<!-- ── Pen setup ── -->
+<section id="tool-pen-setup">
+<h2>Pen setup and bed levelling</h2>
+<p>
+  Before the first plot of a session: fit the pen at the right height, then
+  check it actually reaches the paper everywhere. A plotter bed is never flat,
+  and a pen set perfectly at the centre can be floating at one corner and
+  gouging at another.
+</p>
+
+<pre><code>$ ./luaplot tools/pen-setup.lua /dev/cu.usbmodem1101 \
+      --pen-up 0 --pen-down 150 --paper 180,240 --origin 10,15</code></pre>
+
+<p>The tool runs three phases.</p>
+
+<h3>1. Attach</h3>
+<p>
+  The head moves to the middle of the paper and lowers the holder with nothing
+  fitted. You slide the pen in until the nib just touches, and tighten it
+  there. Setting the height with the holder up is guesswork; setting it with
+  the holder down is not.
+</p>
+
+<h3>2. Survey</h3>
+<p>
+  The head then visits a grid of points across the paper and lowers at each
+  one, pausing so you can look. You are checking that the nib just kisses the
+  paper at every point — not floating, not pressing.
+</p>
+
+<pre><code>-- Survey --------------------------------------------------------
+Visiting 9 points with the pen down. At each one, check the nib just
+touches -- not floating, not pressing.
+  Enter  next point      r  lower again here
+  q      skip to the dot pass      x  abort
+  point 1/9  (row 1, col 1)  X30.0 Y35.0  &gt;
+  point 2/9  (row 1, col 2)  X100.0 Y35.0  &gt;</code></pre>
+
+<p>
+  <code>r</code> lifts and lowers again on the spot, so you can watch the nib
+  land after adjusting a shim without losing your place. Points are walked row
+  by row from nearest you, left to right — predictable rather than efficient,
+  since a person is stepping through them.
+</p>
+
+<h3>3. Verify</h3>
+<p>
+  Finally it revisits every point and puts a dot down without stopping. Nine
+  dots of even weight means you are level. A missing dot is a point the pen
+  never reached; a blot is one where it presses hard. Keep the sheet — it is
+  the record of how your bed sits.
+</p>
+
+<table>
+  <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--pen-up N</code> / <code>--pen-down N</code></td><td>Servo positions. Required — there is no safe default. <a href="#tool-servo">servo-sweep.lua</a> finds them.</td></tr>
+    <tr><td><code>--paper W,H</code></td><td>Paper size in mm (default 200,200).</td></tr>
+    <tr><td><code>--origin X,Y</code></td><td>Machine coordinates of the paper's near-left corner (default 0,0).</td></tr>
+    <tr><td><code>--margin MM</code></td><td>Inset of the grid from the paper edge (default 20).</td></tr>
+    <tr><td><code>--grid N</code></td><td>An N by N grid (default 3).</td></tr>
+    <tr><td><code>--dwell S</code></td><td>Seconds held down on the verify pass (default 0.4).</td></tr>
+    <tr><td><code>--home</code></td><td>Run a GRBL homing cycle first.</td></tr>
+    <tr><td><code>--skip-attach</code></td><td>Go straight to the survey.</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>This tool works in machine coordinates throughout</strong> — Y up,
+  origin at machine zero, no page flip. What it prints is exactly what the
+  controller receives, so there is never a question of which end of the bed you
+  are looking at. That differs from a drawing script, where plotter.lua flips Y
+  for you. Use <code>--home</code> if you want the numbers to mean the same
+  thing tomorrow.
+</div>
+</section>
+
+<!-- ── Calibration tool ── -->
+<section id="tool-calibrate">
+<h2>Calibrating steps per mm</h2>
+<p>
+  If your plotter draws a 100 mm line that measures 98.4 mm, its idea of how
+  many motor steps make a millimetre is wrong. GRBL stores that as
+  <code>$100</code> for X and <code>$101</code> for Y, and the correction is a
+  straight ratio:
+</p>
+<pre><code>new_steps_per_mm = old_steps_per_mm × (commanded / measured)</code></pre>
+<p>
+  Draw shorter than asked, and the machine needs <em>more</em> steps per mm.
+  <code>tools/calibrate.lua</code> does the whole loop:
+</p>
+
+<pre><code>$ ./luaplot tools/calibrate.lua /dev/cu.usbmodem1101 \
+      --pen-up 0 --pen-down 150
+
+Current GRBL settings:
+  $100 (X steps/mm) = 80.000
+  $101 (Y steps/mm) = 80.000
+
+Backup written to grbl-backup-20260820-134502.txt
+
+Drawing 100.000 mm X reference line...
+Measure the X line tick-to-tick and enter the actual length in mm: 98.4
+  X: 80.000 -&gt; 81.301  (+1.63%)
+
+Drawing 100.000 mm Y reference line...
+Measure the Y line tick-to-tick and enter the actual length in mm: 100.7
+  Y: 80.000 -&gt; 79.444  (-0.70%)
+
+Write these to GRBL? [y/N] y
+  -&gt; $100=81.301  ok
+  -&gt; $101=79.444  ok
+
+Re-draw the reference lines to verify? [y/N]</code></pre>
+
+<table>
+  <thead><tr><th>Option</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>--port PORT</code></td><td>Serial port. Also taken from a bare argument, or <code>$LUAPLOT_PORT</code>.</td></tr>
+    <tr><td><code>--pen-up N</code> / <code>--pen-down N</code></td><td>Servo positions. Required — there is no safe default. <a href="#tool-servo">servo-sweep.lua</a> finds them.</td></tr>
+    <tr><td><code>--length MM</code></td><td>Reference line length (default 100).</td></tr>
+    <tr><td><code>--origin X,Y</code></td><td>Where to start drawing (default 20,20).</td></tr>
+    <tr><td><code>--no-backup</code></td><td>Skip the automatic settings backup. Not advised.</td></tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>Measure between the tick marks, not the painted ends.</strong> A pen
+  leaves a blob where it sets down and lifts. The perpendicular ticks at each
+  end mark the exact commanded endpoints.
+</div>
+
+<p>
+  A timestamped backup of every setting is written before anything is changed,
+  so a bad calibration is one <code>grbl-config.lua restore</code> away from
+  being undone. A measurement more than 20% off the commanded length is
+  rejected: at that point something else is wrong — wrong axis, wrong units, a
+  slipped belt — and scaling the setting would only bury the real fault.
+</p>
+
+<h3>Finding pen_up and pen_down in the first place</h3>
+<p>
+  Use <code>plotter.moveto()</code> to park the head over paper and
+  <code>plotter.servo()</code> to sweep the servo until the pen just touches.
+  See <a href="#api-calibration">Calibration</a> below.
+</p>
+</section>
+
+<!-- ── GRBL config tool ── -->
+<section id="tool-grbl">
+<h2>GRBL configuration backup</h2>
+<p>
+  GRBL's settings live in EEPROM. There is no undo, and a wrong value can drive
+  the machine into its own frame. <code>tools/grbl-config.lua</code> exists so
+  that backing up first is easy enough to actually do.
+</p>
+
+<pre><code>$ ./luaplot tools/grbl-config.lua dump grbl-backup.txt
+  read 34 settings -&gt; grbl-backup.txt
+
+$ ./luaplot tools/grbl-config.lua diff grbl-backup.txt
+  $100  80.000     -&gt; 81.301     (X steps/mm)
+  $110  5000       -&gt; 8000       (X max rate)
+  2 of 34 settings differ
+
+$ ./luaplot tools/grbl-config.lua restore grbl-backup.txt
+  ...
+  Apply 2 change(s)? [y/N]</code></pre>
+
+<table>
+  <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td><code>dump [file]</code></td><td>Read every setting with <code>$$</code> and write an annotated, re-loadable file — each value commented with its GRBL 1.1 name, plus <code>$I</code> build info and <code>$N</code> startup blocks. Defaults to a timestamped filename.</td></tr>
+    <tr><td><code>diff &lt;file&gt;</code></td><td>Compare a file against the machine and print exactly what differs.</td></tr>
+    <tr><td><code>restore &lt;file&gt;</code></td><td>The same comparison, then write only the settings that actually changed, after you confirm.</td></tr>
+  </tbody>
+</table>
+
+<p>
+  <code>restore</code> never blind-writes the whole file. Settings present in
+  the file but not on the machine — a different firmware build — are listed and
+  skipped rather than written.
+</p>
+
+<h3>Reading settings from your own scripts</h3>
+<pre><code><span class="kw">local</span> s = <span class="fn">plotter.grbl_settings</span>()   <span class="cm">-- { [100] = 80.0, ... }</span>
+<span class="fn">plotter.grbl_set</span>(<span class="num">100</span>, <span class="num">81.301</span>)
+
+<span class="cm">-- the raw escape hatch: any command, with its reply lines</span>
+<span class="kw">local</span> lines = <span class="fn">serial.query</span>(<span class="str">"$$"</span>)</code></pre>
+</section>
+
+<!-- ── Tests ── -->
+<section id="tool-test">
+<h2>Running the tests</h2>
+<pre><code>make test              <span class="cm"># the whole suite</span>
+./luaplot tests/run.lua        <span class="cm"># same thing</span>
+./luaplot tests/run.lua vec2 noise   <span class="cm"># only matching suites</span></code></pre>
+<p>
+  The suite runs under the <code>luaplot</code> binary itself with no external
+  dependencies. It covers vec2, noise, util, the transform stack, primitive
+  geometry, clipping and bounds, hatching, streamlines, travel optimisation,
+  the Hershey font metrics, and GRBL settings parsing. Serial is not exercised
+  — the GRBL parsing and diffing are tested against canned responses instead.
+</p>
+</section>
 
 <!-- ── Hello world ── -->
 <section id="ex-hello">
@@ -709,12 +1985,21 @@ y' = c·x + d·y + ty</code></pre>
     mode     = <span class="str">"serial"</span>,
     width    = <span class="num">200</span>,
     height   = <span class="num">200</span>,
-    port     = <span class="str">"/dev/tty.usbmodem1101"</span>,
+    port     = <span class="str">"/dev/cu.usbmodem1101"</span>,  <span class="cm">-- macOS: always cu.* not tty.*</span>
     baud     = <span class="num">115200</span>,
     feed     = <span class="num">1500</span>,
     pen_up   = <span class="num">90</span>,
     pen_down = <span class="num">35</span>,
 }</code></pre>
+
+<div class="note">
+  <strong>macOS port naming:</strong> use <code>/dev/cu.usbmodem…</code> or
+  <code>/dev/cu.usbserial…</code> — <em>not</em> <code>/dev/tty.*</code>.
+  The <code>tty.*</code> variant blocks on <code>open()</code> waiting for
+  carrier detect and will cause the script to hang immediately.
+  Run <code>ls /dev/cu.*</code> to find your device name.
+  On Linux use <code>/dev/ttyUSB0</code> or <code>/dev/ttyACM0</code> as normal.
+</div>
 </section>
 
 <!-- ── Transform stack ── -->
@@ -822,6 +2107,162 @@ y' = c·x + d·y + ty</code></pre>
   The resulting <code>rings.nc</code> can be sent to the plotter with any
   GRBL-compatible G-code sender and will produce identical output every time.
 </p>
+</section>
+
+<!-- ── Flow field ── -->
+<section id="ex-flowfield">
+<h3>Flow field</h3>
+<p>
+  The canonical generative plotter piece, and a tour of most of what this page
+  documents: <a href="#mod-noise">noise</a> for the field,
+  <a href="#api-streamline">streamline()</a> to trace it,
+  <a href="#mod-vec2">vec2</a> throughout, and
+  <a href="#api-optimize">travel optimisation</a> to make the result
+  plottable. The full version is <code>examples/flowfield.lua</code>.
+</p>
+
+<pre><code><span class="kw">local</span> plotter = <span class="fn">require</span> <span class="str">'plotter'</span>
+<span class="kw">local</span> util    = <span class="fn">require</span> <span class="str">'util'</span>
+
+<span class="fn">plotter.init</span> {
+    mode     = <span class="str">"svg"</span>,
+    width    = <span class="num">200</span>,
+    height   = <span class="num">260</span>,
+    svg_file = <span class="str">"flowfield.svg"</span>,
+    optimize = <span class="kw">true</span>,
+    clip     = <span class="str">"clip"</span>,
+}
+
+<span class="fn">noise.seed</span>(<span class="num">20260820</span>)
+<span class="fn">math.randomseed</span>(<span class="num">4</span>)
+
+<span class="cm">-- A flow field is just a function from position to direction. Mapping fBm's</span>
+<span class="cm">-- -1..1 onto a full turn makes the field sweep through every direction.</span>
+<span class="kw">local function</span> <span class="fn">field</span>(p)
+    <span class="kw">local</span> a = <span class="fn">noise.fbm</span>(p.x * <span class="num">0.006</span>, p.y * <span class="num">0.006</span>, {octaves = <span class="num">3</span>}) * math.pi * <span class="num">2</span>
+    <span class="kw">return</span> <span class="fn">vec2.from_angle</span>(a)
+<span class="kw">end</span>
+
+<span class="kw">local function</span> <span class="fn">off_page</span>(p)
+    <span class="kw">return</span> p.x &lt; <span class="num">8</span> <span class="kw">or</span> p.y &lt; <span class="num">8</span> <span class="kw">or</span> p.x &gt; <span class="num">192</span> <span class="kw">or</span> p.y &gt; <span class="num">252</span>
+<span class="kw">end</span>
+
+<span class="kw">for</span> _, s <span class="kw">in</span> <span class="fn">ipairs</span>(<span class="fn">util.poisson_disk</span>(<span class="num">184</span>, <span class="num">244</span>, <span class="num">2.6</span>)) <span class="kw">do</span>
+    <span class="kw">local</span> pts = <span class="fn">plotter.streamline</span>(
+        <span class="fn">vec2</span>(s[<span class="num">1</span>] + <span class="num">8</span>, s[<span class="num">2</span>] + <span class="num">8</span>), field, <span class="num">320</span>, <span class="num">1.2</span>, { stop = off_page })
+    <span class="kw">if</span> #pts &gt;= <span class="num">25</span> <span class="kw">then</span> <span class="fn">plotter.polyline</span>(pts) <span class="kw">end</span>
+<span class="kw">end</span>
+
+<span class="fn">plotter.done</span>()</code></pre>
+
+<div class="note">
+  <strong>The hard part is keeping the lines apart.</strong> A flow field
+  attracts. Trace enough lines through one and they converge, pile into the
+  same channels, and the page becomes a solid black blot — an hour of plotting
+  to draw something you cannot see. <code>examples/flowfield.lua</code> adds
+  Jobard and Lefer's evenly-spaced placement on top of the sketch above: as
+  each line is traced, stop it the moment it comes within a set distance of any
+  line already drawn. Occupancy lives in a hash of grid cells so the proximity
+  test looks at nine cells rather than every point so far. In the shipped
+  example that is the difference between 57 minutes of plotting and 9.
+</div>
+</section>
+
+<!-- ── Portrait ── -->
+<section id="ex-portrait">
+<h3>A portrait</h3>
+<p>
+  <code>examples/monalisa.lua</code> — the widest tour of the library here, and
+  a worked answer to a question with no obvious one: luaplot cannot load an
+  image, so how do you draw a picture?
+</p>
+<p>
+  Two things have to be right for a face to read, and they want different
+  tools. <strong>Shape is geometry</strong> — the oval of the face, the fall of
+  the hair, the slope of the shoulders are curves, so they are drawn as curves,
+  every region a few control points through
+  <a href="#api-curves">curve_points()</a>. <strong>Tone is light</strong> —
+  where a region is dark is a separate question from its outline, so it comes
+  from a separate function: <code>shade(x, y)</code> models one light source
+  and a few soft shadows, returning 0 for paper and 1 for full ink.
+</p>
+<p>
+  Keeping them apart is what stops the picture looking like a colouring book,
+  and lets the tone run across a boundary where the real thing has no edge —
+  which is most of a face.
+</p>
+<p>
+  Every region is then rendered with the mark that suits what it is, the way an
+  engraver would:
+</p>
+<table>
+  <thead><tr><th>Region</th><th>Mark</th></tr></thead>
+  <tbody>
+    <tr><td>background</td><td>Flat horizontal <a href="#api-fills">hatching</a> with the figure as a hole, and curves, an arc and a bezier for the landscape</td></tr>
+    <tr><td>hair</td><td><a href="#api-streamline">Streamlines</a> combed along its fall, kept apart by a separation test</td></tr>
+    <tr><td>face, hands</td><td><a href="#mod-util">Poisson-disk</a> stippling, rejected against <code>shade()</code></td></tr>
+    <tr><td>eyes, mouth</td><td>Explicit circles and curves — the only genuine edges in the picture</td></tr>
+    <tr><td>dress</td><td>Cross-hatching in passes, the only way a pen reaches near-black</td></tr>
+    <tr><td>frame</td><td><code>rect()</code>, plus <code>text()</code> centred with <code>text_width()</code> and a signature rotated through the transform stack</td></tr>
+  </tbody>
+</table>
+<p>
+  They hold together because every one of them takes its density from the same
+  <code>shade()</code>. Same light, different marks.
+</p>
+</section>
+
+<!-- ── Brush ── -->
+<section id="ex-brush">
+<h3>Brush painting</h3>
+<p>
+  <code>examples/brush.lua</code> — a two-colour composition of sweeping
+  strokes, showing what changes when the pen is a brush. See
+  <a href="#api-paint">Painting with a brush</a> for the API.
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode      = <span class="str">"serial"</span>,
+    port      = port,
+    feed      = <span class="num">1200</span>,          <span class="cm">-- slower: paint needs time to lay down</span>
+    pen_up    = pen_up,
+    pen_down  = pen_down,
+
+    paint_pots = {
+        ink   = <span class="fn">vec2</span>(<span class="num">8</span>, <span class="num">20</span>),
+        ochre = <span class="fn">vec2</span>(<span class="num">8</span>, <span class="num">55</span>),
+    },
+    pen_dip   = pen_down + <span class="num">25</span>,   <span class="cm">-- the paint sits below the paper</span>
+    dip_time  = <span class="num">1.5</span>,
+    drip_time = <span class="num">2.0</span>,
+    dip_every = <span class="num">180</span>,         <span class="cm">-- about one sweep per brush load</span>
+
+    optimize  = <span class="kw">true</span>,
+}
+
+<span class="fn">plotter.layer</span>(<span class="str">"ink"</span>)      <span class="cm">-- one brush per colour, so one layer per colour</span>
+<span class="fn">plotter.dip</span>(<span class="str">"ink"</span>)
+<span class="cm">-- ... long horizontal sweeps ...</span>
+
+<span class="fn">plotter.layer</span>(<span class="str">"ochre"</span>)    <span class="cm">-- pauses on hardware so you can swap brushes</span>
+<span class="fn">plotter.dip</span>(<span class="str">"ochre"</span>)
+<span class="cm">-- ... a cluster of vertical marks ...</span></code></pre>
+
+<p>What actually differs from a pen plot:</p>
+<ul>
+  <li><strong>Fewer, longer strokes.</strong> A pen plot can afford ten
+      thousand hairline segments; a brush cannot. The example is around sixty
+      strokes.</li>
+  <li><strong>Strokes sized to a brush load.</strong> Each sweep is kept just
+      under <code>dip_every</code>, so it starts fully loaded rather than
+      reloading part-way and fading out.</li>
+  <li><strong>Two colours means two brushes, not two pots.</strong> You cannot
+      clean a brush mid-plot, so each colour is a layer — which is exactly what
+      makes the plot pause and ask you to swap.</li>
+  <li><strong>Travel dominates.</strong> All those trips to the pot mean the
+      run spends more distance travelling than drawing, and a meaningful slice
+      of its time simply waiting for paint to drip.</li>
+</ul>
 </section>
 
 <!-- ── Text layout ── -->

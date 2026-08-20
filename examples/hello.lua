@@ -23,17 +23,29 @@ local plotter = require 'plotter'
 
 -- ── Init ──────────────────────────────────────────────────────────────────────
 
+-- Mode and port come from the command line so this file works on any machine:
+--   ./luaplot examples/hello.lua              -- SVG (default)
+--   ./luaplot examples/hello.lua gcode        -- write a .nc file
+--   ./luaplot examples/hello.lua serial       -- plot it, port from $LUAPLOT_PORT
+--   ./luaplot examples/hello.lua serial /dev/cu.usbmodem1101
+--
+-- pen_up/pen_down are servo positions specific to your machine -- set
+-- $LUAPLOT_PEN_UP and $LUAPLOT_PEN_DOWN, or edit the fallbacks here.
 local mode = arg[1] or "svg"
+local port = arg[2] or os.getenv("LUAPLOT_PORT") or "/dev/ttyUSB0"
+local pen_up   = tonumber(os.getenv("LUAPLOT_PEN_UP"))   or 0
+local pen_down = tonumber(os.getenv("LUAPLOT_PEN_DOWN")) or 150
 
 plotter.init {
     mode     = mode,
     width    = 200,
     height   = 200,
-    port     = "/dev/tty.usbmodem1101",
+    port     = port,
     baud     = 115200,
     feed     = 1500,
-    pen_up   = 90,
-    pen_down = 35,
+    home     = true,
+    pen_up   = pen_up,
+    pen_down = pen_down,
     svg_file = "hello.svg",
 }
 
