@@ -267,6 +267,7 @@
 
   <div class="nav-section">Coordinates</div>
   <a href="#coords">Coordinate system</a>
+  <a href="#coords-origin">Placing the page</a>
   <a href="#transforms">Transform stack</a>
   <a href="#points">Points &amp; vec2</a>
 
@@ -295,6 +296,7 @@
 
   <div class="nav-section">Tools</div>
   <a href="#tool-servo">Finding the servo values</a>
+  <a href="#tool-jog">Jogging &amp; measuring</a>
   <a href="#tool-pen-setup">Pen setup &amp; bed levelling</a>
   <a href="#tool-calibrate">Calibrating steps/mm</a>
   <a href="#tool-grbl">GRBL backup</a>
@@ -351,6 +353,11 @@
 <section id="modes">
 <h2>Output modes</h2>
 <p>
+  <code>./luaplot --help</code> lists the options, the bundled tools, the
+  environment variables, and where it resolved its module directory from —
+  useful when <code>require 'plotter'</code> is not finding anything.
+</p>
+<p>
   The <code>mode</code> field in <code>plotter.init()</code> controls where
   output goes.
 </p>
@@ -402,6 +409,70 @@
 <p>
   SVG also uses Y-down, so no conversion is needed there. You never need to
   think about this unless you are reading the raw G-code output.
+</p>
+</section>
+
+<!-- ── Origin ── -->
+<section id="coords-origin">
+<h2>Placing the page on the bed</h2>
+<p>
+  <code>width</code> and <code>height</code> say how big the page is.
+  <code>origin</code> says where it sits — the machine coordinates of the
+  paper's <strong>near-left corner</strong>, the same corner and the same
+  numbers <a href="#tool-pen-setup">pen-setup.lua</a> takes as
+  <code>--origin</code>.
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode   = <span class="str">"serial"</span>,
+    port   = port,
+    width  = <span class="num">180</span>,
+    height = <span class="num">240</span>,
+    origin = <span class="fn">vec2</span>(<span class="num">43</span>, <span class="num">127</span>),   <span class="cm">-- where the paper actually is</span>
+}</code></pre>
+
+<p>
+  Supplying it changes which coordinate frame the plot is emitted in, and that
+  is the part worth understanding:
+</p>
+
+<table>
+  <thead><tr><th></th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>origin omitted</strong></td>
+      <td>The preamble sends <code>G92 X0 Y0</code>, making wherever the head is parked the corner of the page. Nothing needs homing — park the head and plot. This is the original behaviour and remains the default.</td>
+    </tr>
+    <tr>
+      <td><strong>origin given</strong></td>
+      <td>Coordinates are absolute machine positions, so the plot lands in the same physical place every run. Needs the machine homed, and the preamble sends <code>G92.1</code> to clear any work offset still in force.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>That <code>G92.1</code> is not defensive programming.</strong>
+  <a href="#tool-jog">jog.lua</a> sets exactly such an offset when you press
+  <code>0</code> to mark the paper corner — which is the very workflow that
+  produces the origin you then pass in here. Without clearing it the plot would
+  land twice as far out as intended. luaplot also reads the machine's status
+  after connecting and warns if a work offset survives.
+</div>
+
+<h3>Finding the numbers</h3>
+<p>
+  <a href="#tool-jog">jog.lua</a> is built for this: jog to the near-left
+  corner of the paper, press <code>0</code>, and the machine column reads your
+  <code>origin</code>. Jog to the far corner and the work column reads your
+  <code>width</code> and <code>height</code>.
+</p>
+
+<p>
+  The origin is a machine-space offset, so it does not disturb anything in
+  drawing space: <code>plotter.paths()</code>, <code>bounds()</code> and the
+  clip window are all still relative to the page. Clipping means
+  <em>on the paper</em>, wherever the paper happens to be. It has no effect on
+  SVG output at all.
 </p>
 </section>
 
@@ -563,6 +634,12 @@ y' = c·x + d·y + ty</code></pre>
       <td class="type">string</td>
       <td class="default">"output.nc"</td>
       <td>G-code output path (gcode mode only)</td>
+    </tr>
+    <tr>
+      <td>origin</td>
+      <td class="type">vec2</td>
+      <td class="default">—</td>
+      <td>Machine coordinates of the paper's near-left corner. Omitted, the plot starts wherever the head is parked. See <a href="#coords-origin">Placing the page on the bed</a>.</td>
     </tr>
     <tr>
       <td>auto_flush</td>
@@ -1743,6 +1820,61 @@ S&gt; 30
 </p>
 </section>
 
+<!-- ── Jog ── -->
+<section id="tool-jog">
+<h2>Jogging and measuring</h2>
+<p>
+  An etch-a-sketch for the plotter: drive the head around by hand, raise and
+  lower the pen, and watch the coordinates. It answers the questions a drawing
+  script cannot — where the paper actually is, how far its corner sits from
+  machine zero, and what <code>width</code>/<code>height</code> to pass
+  <code>init()</code>.
+</p>
+
+<pre><code>$ ./luaplot tools/jog.lua --pen-up 0 --pen-down 150
+
+  Idle    machine    43.00   127.50   work     0.00     0.00   step 10   pen up</code></pre>
+
+<table>
+  <thead><tr><th>Key</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td>arrows or WASD</td><td>Move by the current step</td></tr>
+    <tr><td><code>[</code> <code>]</code></td><td>Halve / double the step</td></tr>
+    <tr><td><code>1</code> <code>2</code> <code>3</code> <code>4</code></td><td>Step 0.1, 1, 10, 50 mm</td></tr>
+    <tr><td>space</td><td>Pen up / down</td></tr>
+    <tr><td><code>0</code></td><td>Set the work origin here (<code>G92</code>)</td></tr>
+    <tr><td><code>m</code> / <code>o</code></td><td>Go to machine zero / the work origin</td></tr>
+    <tr><td><code>h</code></td><td>Home (<code>$H</code>)</td></tr>
+    <tr><td><code>q</code></td><td>Quit, lifting the pen</td></tr>
+  </tbody>
+</table>
+
+<h3>Measuring your paper</h3>
+<p>
+  Jog to the near-left corner of the paper and press <code>0</code>. From then
+  on the <strong>work</strong> column reads distances from that corner while
+  <strong>machine</strong> keeps reading from machine zero.
+</p>
+<p>
+  Now jog to the far corner. The work reading there is your
+  <strong>paper size</strong>; the machine reading back at the near corner is
+  the <code>--origin</code> that
+  <a href="#tool-pen-setup">pen-setup.lua</a> wants. Both measured rather than
+  guessed, in about a minute.
+</p>
+
+<div class="note">
+  <strong>Home first</strong> if your machine has limit switches — machine
+  coordinates only mean anything once GRBL knows where it is. The tool offers
+  to.
+  <br><br>
+  Movement uses GRBL's <code>$J=</code> jog commands rather than
+  <code>G0</code>. Jogs leave the modal state alone, so nothing here can change
+  how a later plot is interpreted, and GRBL refuses a jog that would leave the
+  work area when soft limits are on rather than driving into the frame.
+</div>
+</section>
+
 <!-- ── Pen setup ── -->
 <section id="tool-pen-setup">
 <h2>Pen setup and bed levelling</h2>
@@ -2000,6 +2132,70 @@ $ ./luaplot tools/grbl-config.lua restore grbl-backup.txt
   Run <code>ls /dev/cu.*</code> to find your device name.
   On Linux use <code>/dev/ttyUSB0</code> or <code>/dev/ttyACM0</code> as normal.
 </div>
+</section>
+
+<!-- ── Origin ── -->
+<section id="coords-origin">
+<h2>Placing the page on the bed</h2>
+<p>
+  <code>width</code> and <code>height</code> say how big the page is.
+  <code>origin</code> says where it sits — the machine coordinates of the
+  paper's <strong>near-left corner</strong>, the same corner and the same
+  numbers <a href="#tool-pen-setup">pen-setup.lua</a> takes as
+  <code>--origin</code>.
+</p>
+
+<pre><code><span class="fn">plotter.init</span> {
+    mode   = <span class="str">"serial"</span>,
+    port   = port,
+    width  = <span class="num">180</span>,
+    height = <span class="num">240</span>,
+    origin = <span class="fn">vec2</span>(<span class="num">43</span>, <span class="num">127</span>),   <span class="cm">-- where the paper actually is</span>
+}</code></pre>
+
+<p>
+  Supplying it changes which coordinate frame the plot is emitted in, and that
+  is the part worth understanding:
+</p>
+
+<table>
+  <thead><tr><th></th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>origin omitted</strong></td>
+      <td>The preamble sends <code>G92 X0 Y0</code>, making wherever the head is parked the corner of the page. Nothing needs homing — park the head and plot. This is the original behaviour and remains the default.</td>
+    </tr>
+    <tr>
+      <td><strong>origin given</strong></td>
+      <td>Coordinates are absolute machine positions, so the plot lands in the same physical place every run. Needs the machine homed, and the preamble sends <code>G92.1</code> to clear any work offset still in force.</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="note">
+  <strong>That <code>G92.1</code> is not defensive programming.</strong>
+  <a href="#tool-jog">jog.lua</a> sets exactly such an offset when you press
+  <code>0</code> to mark the paper corner — which is the very workflow that
+  produces the origin you then pass in here. Without clearing it the plot would
+  land twice as far out as intended. luaplot also reads the machine's status
+  after connecting and warns if a work offset survives.
+</div>
+
+<h3>Finding the numbers</h3>
+<p>
+  <a href="#tool-jog">jog.lua</a> is built for this: jog to the near-left
+  corner of the paper, press <code>0</code>, and the machine column reads your
+  <code>origin</code>. Jog to the far corner and the work column reads your
+  <code>width</code> and <code>height</code>.
+</p>
+
+<p>
+  The origin is a machine-space offset, so it does not disturb anything in
+  drawing space: <code>plotter.paths()</code>, <code>bounds()</code> and the
+  clip window are all still relative to the page. Clipping means
+  <em>on the paper</em>, wherever the paper happens to be. It has no effect on
+  SVG output at all.
+</p>
 </section>
 
 <!-- ── Transform stack ── -->

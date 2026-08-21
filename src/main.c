@@ -23,6 +23,7 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include <dirent.h>
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -96,6 +97,34 @@ static void global_module(lua_State *L, const char *name) {
  * '?' is replaced by the module name, so "…/lua/?.lua" with require("plotter")
  * becomes "…/lua/plotter.lua".
  */
+/*
+ * Where the bundled lua/ directory lives, resolved from argv[0].
+ *
+ * Shared by setup_package_path and the help text, so what --help reports is
+ * the same directory require() will actually search -- the two drifting apart
+ * would make the help actively misleading when a path problem is exactly what
+ * you are trying to debug.
+ *
+ * Writes into buf and returns it, or NULL if nothing plausible was found.
+ */
+static const char *resolve_root(const char *argv0, char *buf, size_t len) {
+    char exedir[PATH_MAX];
+    snprintf(exedir, sizeof(exedir), "%s", argv0 ? argv0 : ".");
+    const char *dir = dirname(exedir);   /* dirname may modify its argument */
+
+    const char *candidates[] = { "%s", "%s/..", "." };
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(*candidates); i++) {
+        char probe[PATH_MAX];
+        snprintf(buf, len, candidates[i], dir);
+        snprintf(probe, sizeof(probe), "%s/lua/plotter.lua", buf);
+        if (access(probe, R_OK) == 0)
+            return buf;
+    }
+
+    return NULL;
+}
+
 static void setup_package_path(lua_State *L, const char *argv0) {
     lua_getglobal(L, "package");
     lua_getfield(L, -1, "path");
@@ -122,6 +151,150 @@ static void setup_package_path(lua_State *L, const char *argv0) {
     lua_remove(L, -2);          /* drop the old path string */
     lua_setfield(L, -2, "path");
     lua_pop(L, 1);              /* pop package */
+}
+
+/* ── Help ─────────────────────────────────────────────────────────────────── */
+
+/*
+ * Pull a one-line description out of a tool's header comment.
+ *
+ * Every tool opens with a block comment whose first line names the file and
+ * follows it with an em dash and a description. Reading that back means the
+ * listing cannot go stale as tools are added or renamed, which a hand-written
+ * list in this file certainly would.
+ *
+ * Returns 1 and fills desc on success.
+ */
+static int tool_description(const char *path, char *desc, size_t len) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+
+    char line[512];
+    int found = 0;
+
+    /* The description is in the header, so a handful of lines is plenty */
+    for (int i = 0; i < 8 && fgets(line, sizeof(line), f); i++) {
+        /* U+2014 EM DASH is three bytes in UTF-8 */
+        char *dash = strstr(line, "\xe2\x80\x94");
+        size_t skip = 3;
+
+        if (!dash) { dash = strstr(line, " -- "); skip = 4; }
+        if (!dash) continue;
+
+        char *text = dash + skip;
+        while (*text == ' ') text++;
+
+        char *nl = strchr(text, '\n');
+        if (nl) *nl = '\0';
+
+        if (*text) {
+            snprintf(desc, len, "%s", text);
+            found = 1;
+        }
+        break;
+    }
+
+    fclose(f);
+    return found;
+}
+
+/* List the bundled tools, newest information first: read from disk, not from
+ * a list in this file that someone has to remember to update. */
+static void list_tools(const char *root) {
+    char dirpath[PATH_MAX];
+    snprintf(dirpath, sizeof(dirpath), "%s/tools", root);
+
+    DIR *d = opendir(dirpath);
+    if (!d) return;
+
+    /* Collect and sort, so the listing does not depend on directory order */
+    char names[64][NAME_MAX];
+    int  count = 0;
+
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL && count < 64) {
+        size_t n = strlen(e->d_name);
+        if (n > 4 && strcmp(e->d_name + n - 4, ".lua") == 0)
+            snprintf(names[count++], NAME_MAX, "%s", e->d_name);
+    }
+    closedir(d);
+
+    if (count == 0) return;
+
+    for (int i = 0; i < count - 1; i++)
+        for (int j = i + 1; j < count; j++)
+            if (strcmp(names[i], names[j]) > 0) {
+                char t[NAME_MAX];
+                snprintf(t, sizeof(t), "%s", names[i]);
+                snprintf(names[i], NAME_MAX, "%s", names[j]);
+                snprintf(names[j], NAME_MAX, "%s", t);
+            }
+
+    printf("\nTools (run with --help for each tool's own options):\n");
+
+    for (int i = 0; i < count; i++) {
+        char path[PATH_MAX], desc[256];
+        snprintf(path, sizeof(path), "%s/tools/%s", root, names[i]);
+
+        if (tool_description(path, desc, sizeof(desc)))
+            printf("  tools/%-20s %s\n", names[i], desc);
+        else
+            printf("  tools/%s\n", names[i]);
+    }
+}
+
+static void print_help(const char *argv0) {
+    printf(
+"luaplot - a Lua-scriptable toolkit for pen plotters running GRBL\n"
+"\n"
+"Usage:\n"
+"  %s <script.lua> [args...]     run a script\n"
+"  %s --help                     this message\n"
+"  %s --version                  version information\n"
+"\n"
+"Arguments after the script name are passed through to it in the global\n"
+"'arg' table, the same way the standard Lua interpreter does it. Most of the\n"
+"bundled examples read arg[1] as an output mode and arg[2] as a serial port:\n"
+"\n"
+"  %s examples/hello.lua                  SVG preview (the default)\n"
+"  %s examples/hello.lua gcode            write a .nc file\n"
+"  %s examples/hello.lua serial           plot it over serial\n"
+"  %s examples/hello.lua serial /dev/cu.usbmodem1101\n"
+"\n"
+"Output modes are chosen by the script through plotter.init{mode=...}:\n"
+"  svg      write an SVG file, no hardware needed\n"
+"  gcode    write a .nc G-code file for later playback\n"
+"  serial   stream G-code to the plotter\n"
+"  both     serial and SVG at once\n"
+"\n"
+"Environment:\n"
+"  LUAPLOT_PORT       default serial port for the tools and examples\n"
+"  LUAPLOT_PEN_UP     default pen-up servo value for the examples\n"
+"  LUAPLOT_PEN_DOWN   default pen-down servo value\n"
+"  LUAPLOT_PATH       extra directories to search for Lua modules; prepended\n"
+"                     to package.path ahead of the bundled lua/\n"
+"\n"
+"Modules available to a script:\n"
+"  plotter   require 'plotter'   drawing, transforms, output (the main API)\n"
+"  util      require 'util'      maths, seeded random, point distributions\n"
+"  grbl      require 'grbl'      GRBL settings, status, alarm handling\n"
+"  serial    require 'serial'    raw serial access\n"
+"  vec2      (a global)          2D vector primitive\n"
+"  noise     (a global)          Perlin, fBm, Worley noise\n",
+        argv0, argv0, argv0, argv0, argv0, argv0, argv0);
+
+    char root[PATH_MAX];
+    const char *found = resolve_root(argv0, root, sizeof(root));
+
+    if (found) {
+        list_tools(found);
+        printf("\nModules are being loaded from: %s/lua\n", found);
+        printf("Full documentation: %s/docs/index.html\n", found);
+    } else {
+        printf("\nWARNING: could not find the bundled lua/ directory near %s\n"
+               "         require 'plotter' will fail. Run luaplot from the\n"
+               "         repository root, or set LUAPLOT_PATH.\n", argv0);
+    }
 }
 
 /* ── Error reporting ──────────────────────────────────────────────────────── */
@@ -163,8 +336,25 @@ static void report_error(lua_State *L) {
 /* ── main ─────────────────────────────────────────────────────────────────── */
 
 int main(int argc, char *argv[]) {
+    /*
+     * Only argv[1] is inspected for options. Everything after the script name
+     * belongs to the script, so a plot that takes a --help of its own is not
+     * intercepted here.
+     */
+    if (argc >= 2) {
+        if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
+            print_help(argv[0]);
+            return 0;
+        }
+        if (strcmp(argv[1], "--version") == 0 || strcmp(argv[1], "-v") == 0) {
+            printf("luaplot (built against %s)\n", LUA_RELEASE);
+            return 0;
+        }
+    }
+
     if (argc < 2) {
-        fprintf(stderr, "Usage: %s <script.lua>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <script.lua> [args...]\n", argv[0]);
+        fprintf(stderr, "Try '%s --help' for the full list.\n", argv[0]);
         return 1;
     }
     const char *script = argv[1];

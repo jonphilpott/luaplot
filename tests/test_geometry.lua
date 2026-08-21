@@ -198,6 +198,67 @@ t.describe("flush and done", function()
         t.assert_near(plotter.stats().draw_mm, after, 1e-12)
     end)
 
+    t.it("done can be called repeatedly in gcode mode too", function()
+        -- The svg case above never exercises the port-closing branch
+        local out = os.tmpname()
+        plotter.init { mode = "gcode", width = 100, height = 100,
+                       gcode_file = out, quiet = true, clip = "off" }
+        plotter.line(10, 10, 20, 20)
+        plotter.done()
+        plotter.done()
+        plotter.done()
+        os.remove(out)
+        t.assert_eq(plotter.stats().paths, 1)
+    end)
+
+    t.it("drawing after done() is refused, and says why", function()
+        -- Previously this surfaced as a bare "Serial port is not open" from
+        -- deep inside serial.writeline, and only in serial mode -- so the same
+        -- script appeared to work in svg and failed on hardware
+        fresh { auto_flush = false }
+        plotter.line(0, 0, 10, 10)
+        plotter.done()
+
+        local err = t.assert_error(function() plotter.line(20, 20, 30, 30) end,
+                                   "after plotter%.done")
+        t.assert_true(tostring(err):find("keep_open", 1, true) ~= nil,
+            "the message should name the alternatives")
+    end)
+
+    t.it("every primitive is refused, not just line", function()
+        fresh()
+        plotter.done()
+        t.assert_error(function() plotter.rect(0, 0, 10, 10) end, "after plotter%.done")
+        t.assert_error(function() plotter.circle(50, 50, 10) end, "after plotter%.done")
+        t.assert_error(function() plotter.text(0, 0, "A", 10) end, "after plotter%.done")
+        t.assert_error(function() plotter.polyline({{0,0},{1,1}}) end, "after plotter%.done")
+    end)
+
+    t.it("dip is refused too", function()
+        plotter.init { mode = "svg", width = 100, height = 100, svg_file = SINK,
+                       quiet = true, clip = "off", paint_pot = {5, 5},
+                       pen_up = 0, pen_down = 150 }
+        plotter.done()
+        t.assert_error(plotter.dip, "after plotter%.done")
+    end)
+
+    t.it("keep_open leaves the session usable", function()
+        fresh { auto_flush = false }
+        plotter.line(0, 0, 10, 10)
+        plotter.done { keep_open = true }
+        plotter.line(20, 20, 30, 30)      -- must not raise
+        plotter.done()
+        t.assert_eq(plotter.stats().paths, 2)
+    end)
+
+    t.it("init reopens a finished session", function()
+        fresh()
+        plotter.done()
+        fresh()
+        plotter.line(0, 0, 10, 10)        -- must not raise
+        t.assert_eq(#plotter.paths(), 1)
+    end)
+
     t.it("auto_flush emits as it goes", function()
         fresh { auto_flush = true }
         plotter.line(0, 0, 10, 0)
@@ -262,6 +323,84 @@ t.describe("layers", function()
         os.remove(out)
 
         t.assert_eq(select(2, svg:gsub("<g ", "")), 0)
+    end)
+end)
+
+t.describe("origin", function()
+    local function gcode_lines(cfg)
+        local out = os.tmpname()
+        cfg.mode = "gcode"; cfg.gcode_file = out; cfg.quiet = true
+        cfg.width = cfg.width or 100; cfg.height = cfg.height or 200
+        cfg.clip = "off"
+        plotter.init(cfg)
+        plotter.line(10, 20, 30, 40)
+        plotter.done()
+        local lines = {}
+        for line in io.lines(out) do lines[#lines + 1] = line end
+        os.remove(out)
+        return table.concat(lines, "\n")
+    end
+
+    t.it("defaults to no offset, and zeroes the frame at the head", function()
+        local g = gcode_lines {}
+        t.assert_true(g:find("G92 X0 Y0 Z0", 1, true) ~= nil,
+            "without an origin the page should start where the head is")
+        -- drawing (10,20) on a 200-tall page is machine (10, 180)
+        t.assert_true(g:find("X10.000 Y180.000", 1, true) ~= nil)
+    end)
+
+    t.it("shifts every coordinate by the origin", function()
+        local g = gcode_lines { origin = {43, 127} }
+        t.assert_true(g:find("X53.000 Y307.000", 1, true) ~= nil,
+            "expected (10,20) to land at (10+43, 200-20+127)")
+        t.assert_true(g:find("X73.000 Y287.000", 1, true) ~= nil,
+            "expected (30,40) to land at (30+43, 200-40+127)")
+    end)
+
+    t.it("clears stale work offsets instead of zeroing the frame", function()
+        local g = gcode_lines { origin = {43, 127} }
+        t.assert_true(g:find("G92.1", 1, true) ~= nil,
+            "an absolute plot has to cancel any G92 offset in force")
+        t.assert_nil(g:match("G92 X0 Y0 Z0"),
+            "and must not re-zero the frame at the head")
+    end)
+
+    t.it("accepts a vec2", function()
+        local g = gcode_lines { origin = vec2(43, 127) }
+        t.assert_true(g:find("X53.000 Y307.000", 1, true) ~= nil)
+    end)
+
+    t.it("parks at the page corner rather than machine zero", function()
+        local g = gcode_lines { origin = {43, 127} }
+        t.assert_true(g:find("G0 X43.000 Y127.000", 1, true) ~= nil,
+            "parking at machine zero could be a long traverse away")
+    end)
+
+    t.it("an origin of 0,0 still means absolute", function()
+        -- Explicitly asking for the machine frame is different from not asking
+        local g = gcode_lines { origin = {0, 0} }
+        t.assert_true(g:find("G92.1", 1, true) ~= nil)
+        t.assert_nil(g:match("G92 X0 Y0 Z0"))
+    end)
+
+    t.it("does not disturb drawing-space geometry", function()
+        -- The origin is a machine-space offset, so paths() is unaffected
+        plotter.init { mode = "svg", width = 100, height = 200, svg_file = SINK,
+                       origin = {43, 127}, quiet = true, clip = "off",
+                       auto_flush = false }
+        plotter.line(10, 20, 30, 40)
+        t.assert_point(plotter.paths()[1].pts[1], 10, 20)
+    end)
+
+    t.it("does not move the clip window", function()
+        -- Clipping is against the paper, not the bed
+        plotter.init { mode = "svg", width = 100, height = 200, svg_file = SINK,
+                       origin = {43, 127}, quiet = true, clip = "clip",
+                       auto_flush = false }
+        plotter.line(-50, 100, 150, 100)
+        local p = plotter.paths()[1]
+        t.assert_point(p.pts[1], 0, 100, 1e-9)
+        t.assert_point(p.pts[2], 100, 100, 1e-9)
     end)
 end)
 

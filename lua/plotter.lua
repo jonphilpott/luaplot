@@ -280,17 +280,30 @@ local function gcode(cmd)
 end
 
 --[[
-    Convert Lua Y coordinate (Y-down, origin top-left) to G-code Y
-    (Y-up, origin bottom-left).
+    Convert a point from drawing space to the machine's coordinate space.
 
-    If the work area height is H:
-        gcode_y = H - lua_y
+    Two things happen here, and they are the only place either happens:
 
-    Example: lua_y=0  (top edge)    → gcode_y = H  (top of work area)
-             lua_y=H  (bottom edge) → gcode_y = 0  (plotter home Y)
+    1. THE Y FLIP. Drawing space is Y-down with the origin at the top-left, the
+       screen convention Processing uses. Machine space is Y-up with the origin
+       at the bottom-left, because that is where a GRBL machine homes. For a
+       work area of height H:
+
+           machine_y = H - drawing_y
+
+       so drawing y=0 (the top edge) is the far side of the bed, and y=H (the
+       bottom edge) is nearest the operator.
+
+    2. THE ORIGIN OFFSET. cfg.origin says where the near-left corner of the
+       paper sits in machine coordinates, so the whole drawing is translated
+       there. It defaults to (0, 0), which leaves the old behaviour untouched.
+
+    Deliberately NOT the transform stack: this is the fixed relationship
+    between the page and the bed, not something a script composes with.
 --]]
-local function gy(lua_y)
-    return cfg.height - lua_y
+local function to_machine(x, y)
+    return x + cfg.origin.x,
+           (cfg.height - y) + cfg.origin.y
 end
 
 -- Format a number for G-code: 3 decimal places
@@ -298,12 +311,19 @@ local function gfmt(n)
     return string.format("%.3f", n)
 end
 
--- Move to (x, y) in G-code space — the caller is responsible for Y-flip
-local function gmove(gx, gy_val, feed)
+--[[
+    Move to a point given in DRAWING coordinates.
+
+    The conversion happens here rather than at the call sites, so no caller can
+    forget the origin offset the way they previously had to remember the Y
+    flip. feed nil means a rapid (G0), otherwise a feed move (G1).
+--]]
+local function gmove(x, y, feed)
+    local mx, my = to_machine(x, y)
     if feed then
-        gcode(string.format("G1 X%s Y%s F%s", gfmt(gx), gfmt(gy_val), gfmt(feed)))
+        gcode(string.format("G1 X%s Y%s F%s", gfmt(mx), gfmt(my), gfmt(feed)))
     else
-        gcode(string.format("G0 X%s Y%s", gfmt(gx), gfmt(gy_val)))
+        gcode(string.format("G0 X%s Y%s", gfmt(mx), gfmt(my)))
     end
 end
 
@@ -565,7 +585,32 @@ local function path_length(pts, close)
     return total
 end
 
+--[[
+    Refuse to draw into a session that has been closed.
+
+    Without this the failure surfaces four frames down as a bare "Serial port
+    is not open" from serial.writeline, which says nothing about the actual
+    mistake. Worse, it only happens in serial mode: in SVG mode the same script
+    quietly appends to the finished drawing, so the bug hides until it reaches
+    hardware. Failing the same way in every mode is the point.
+--]]
+local function check_open()
+    if not finished then return end
+
+    -- Level 0: no position prefix. The honest position is the caller's line,
+    -- and it is several frames up through whichever primitive they used, so
+    -- any fixed level would name a line inside plotter.lua instead. luaplot
+    -- always installs a traceback handler, so the real call site still shows.
+    error(
+        "drawing after plotter.done(), which ended the session.\n" ..
+        "  To keep drawing, either call flush() in a loop and done() once at " ..
+        "the end,\n" ..
+        "  or pass done { keep_open = true } to park and write output without " ..
+        "closing the port.", 0)
+end
+
 local function record(pts, close, what)
+    check_open()
     if #pts < 2 then return end
 
     local runs
@@ -772,15 +817,15 @@ local function emit_gcode(p)
     local wp = p.pts
 
     M.penup()
-    gmove(wp[1][1], gy(wp[1][2]), nil)     -- rapid to start (pen up)
+    gmove(wp[1][1], wp[1][2], nil)         -- rapid to start (pen up)
     M.pendown()
 
     for i = 2, #wp do
-        gmove(wp[i][1], gy(wp[i][2]), cfg.feed)
+        gmove(wp[i][1], wp[i][2], cfg.feed)
     end
 
     if p.close then
-        gmove(wp[1][1], gy(wp[1][2]), cfg.feed)  -- close back to start
+        gmove(wp[1][1], wp[1][2], cfg.feed)      -- close back to start
     end
 
     M.penup()
@@ -801,7 +846,7 @@ end
 local function emit_dip(d)
     M.penup()                                   -- no-op if already up
 
-    gmove(d.x, gy(d.y), nil)                    -- rapid to the pot, pen clear
+    gmove(d.x, d.y, nil)                        -- rapid to the pot, pen clear
 
     gcode(string.format("M3 S%d", d.pen_dip))   -- into the paint
     gcode(string.format("G4 P%.3f", d.dip_time))
@@ -1650,6 +1695,8 @@ end
     travel optimiser will not reorder across.  See plotter.flush.
 --]]
 function M.dip(name, opts)
+    check_open()
+
     if type(name) == "table" then
         name, opts = nil, name
     end
@@ -1842,7 +1889,7 @@ end
 function M.moveto(a, b)
     if not want_serial() then return end
     local x, y = xy(a, b)
-    gcode(string.format("G0 X%s Y%s", gfmt(x), gfmt(gy(y))))
+    gmove(x, y, nil)
     pen_x, pen_y = x, y
 end
 
@@ -1916,6 +1963,20 @@ function M.unlock()
     end
     serial.writeline("$X")
     return M
+end
+
+--[[
+    plotter.status() -> table
+
+    The machine's current state and position, as
+        { state = "Idle", mpos = {x,y,z}, wpos = {x,y,z}, wco = {x,y,z} }
+
+    Reads a GRBL status report. See grbl.parse_status for the details of the
+    conversion between machine and work coordinates.
+--]]
+function M.status()
+    local grbl = require 'grbl'
+    return grbl.status()
 end
 
 --[[
@@ -2005,6 +2066,13 @@ end
         width     work area width  in mm (also SVG viewport width)
         height    work area height in mm (also SVG viewport height)
 
+    Optional (all modes):
+        origin    machine coordinates of the paper's near-left corner, as a
+                  vec2 or {x, y}. Omitted, the plot starts wherever the head
+                  is parked; given, it lands at the same physical place every
+                  time. See the note in init() -- it changes which coordinate
+                  frame is emitted, and the absolute frame needs homing.
+
     Optional (serial/both mode):
         port      serial port path  (default "/dev/ttyUSB0")
         baud      baud rate         (default 115200)
@@ -2069,6 +2137,35 @@ function M.init(config)
     -- The paint surface sits lower than the paper, so dipping usually wants
     -- its own servo position. Falls back to pen_down when unset.
     cfg.pen_dip = config.pen_dip or cfg.pen_down
+
+    --[[
+        Where the page sits on the bed.
+
+        Given as machine coordinates of the paper's NEAR-LEFT corner -- the
+        same corner and the same numbers tools/pen-setup.lua takes as
+        --origin, and that tools/jog.lua reads out when you zero the work
+        origin there.
+
+        Supplying it changes which coordinate frame the plot is emitted in,
+        which is the part worth understanding:
+
+          origin omitted   the preamble sends G92 X0 Y0, making wherever the
+                           head happens to be the corner of the page. Nothing
+                           needs homing; you park the head and plot.
+
+          origin given     coordinates are absolute machine positions, so the
+                           plot lands in the same physical place every time.
+                           This needs the machine homed, and any leftover G92
+                           offset cleared -- which the preamble does.
+    --]]
+    if config.origin then
+        local ox, oy = xy(config.origin)
+        cfg.origin = { x = ox, y = oy }
+        cfg.absolute = true
+    else
+        cfg.origin = { x = 0, y = 0 }
+        cfg.absolute = false
+    end
 
     -- Reordering means holding paths back until flush(), so it cannot coexist
     -- with emitting each primitive as it is drawn.
@@ -2160,8 +2257,41 @@ function M.init(config)
     if want_gcode() then
         gcode("G21")          -- metric units
         gcode("G90")          -- absolute positioning
-        gcode("G92 X0 Y0 Z0") -- zero the work coordinate system here
+
+        if cfg.absolute then
+            --[[
+                An explicit origin means the coordinates below are machine
+                positions, so any work offset in force has to go first --
+                otherwise the plot lands wherever the last G92 happened to
+                leave the frame.
+
+                This is not hypothetical: tools/jog.lua sets exactly such an
+                offset when you press 0 to mark the paper corner, which is
+                the very workflow that produces the origin you are passing in
+                here. G92.1 cancels it.
+            --]]
+            gcode("G92.1")
+        else
+            -- No origin given, so the page starts where the head is now
+            gcode("G92 X0 Y0 Z0")
+        end
+
         gcode("M3 S0")        -- spindle on at 0 (servo initialise)
+    end
+
+    -- A stale work offset would silently displace an absolute plot, and the
+    -- machine can tell us. Cheap to check, and the failure is otherwise a
+    -- ruined sheet of paper.
+    if cfg.absolute and want_serial() then
+        local ok, st = pcall(M.status)
+        if ok and st.wco and (math.abs(st.wco.x) > 1e-6 or math.abs(st.wco.y) > 1e-6) then
+            warn("wco", string.format(
+                "a work coordinate offset of (%.2f, %.2f) is still in force, " ..
+                "so this plot will land that far from the origin you asked " ..
+                "for. Clear it with G10 L2 P1 X0 Y0, or drop the origin " ..
+                "option to plot relative to the head's current position.",
+                st.wco.x, st.wco.y))
+        end
     end
 end
 
@@ -2239,9 +2369,12 @@ function M.done(opts)
 
     if not finished and want_gcode() then
         M.penup()
-        gcode("G0 X0 Y0")    -- return to home
+        -- Park at the page's near-left corner. With an origin set that is a
+        -- real place on the bed rather than machine zero, which could be a
+        -- long unnecessary traverse away.
+        gmove(0, cfg.height, nil)
         gcode("M5")          -- spindle off
-        pen_x, pen_y = 0, 0
+        pen_x, pen_y = 0, cfg.height
     end
 
     if want_serial() and not opts.keep_open then

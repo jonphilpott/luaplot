@@ -441,6 +441,55 @@ static int l_query(lua_State *L) {
 }
 
 /*
+ * serial.status() -> "<Idle|MPos:0.000,0.000,0.000|FS:0,0>"
+ *
+ * Send '?' and return GRBL's status report verbatim.
+ *
+ * This needs its own function because a status report is not a normal reply:
+ * '?' is a realtime command, answered from an interrupt without ever producing
+ * an "ok", so writeline() and query() would both wait for an acknowledgement
+ * that is never coming. It is also the only way to read the machine's
+ * position, which is what makes an interactive jog tool possible.
+ *
+ * Any other traffic that arrives first -- a late "ok" from a previous command,
+ * say -- is skipped.
+ */
+static int l_status(lua_State *L) {
+    if (fd < 0)
+        return luaL_error(L, "Serial port is not open");
+
+    if (write(fd, "?", 1) < 0)
+        return luaL_error(L, "Write failed: %s", strerror(errno));
+
+    char resp[256];
+    int  quiet = 0;
+
+    while (1) {
+        int n = read_line(resp, sizeof(resp));
+
+        if (n == READ_TIMEOUT) {
+            if (++quiet >= reply_timeout)
+                return luaL_error(L,
+                    "No status report from GRBL after %d s. Check the cable, "
+                    "the port, and that the controller is powered.",
+                    reply_timeout);
+
+            if (write(fd, "?", 1) < 0)
+                return luaL_error(L, "Write failed: %s", strerror(errno));
+            continue;
+        }
+
+        quiet = 0;
+
+        if (n > 0 && resp[0] == '<') {
+            lua_pushstring(L, resp);
+            return 1;
+        }
+        /* something else in the buffer; keep looking for the report */
+    }
+}
+
+/*
  * serial.set_timeout(seconds) -> previous
  *
  * How long a command may leave the port silent before we give up on it.
@@ -486,6 +535,7 @@ static const luaL_Reg serial_lib[] = {
     {"open",        l_open},
     {"writeline",   l_writeline},
     {"query",       l_query},
+    {"status",      l_status},
     {"set_timeout", l_set_timeout},
     {"is_open",     l_is_open},
     {"close",       l_close},

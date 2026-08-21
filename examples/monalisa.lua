@@ -50,7 +50,7 @@
 local plotter = require 'plotter'
 local util    = require 'util'
 
-local W, H = 200, 260
+local W, H = 270, 340
 
 local mode = arg[1] or "svg"
 local port = arg[2] or os.getenv("LUAPLOT_PORT") or "/dev/ttyUSB0"
@@ -69,6 +69,8 @@ plotter.init {
     pen_up   = pen_up,
     pen_down = pen_down,
     svg_file = "monalisa.svg",
+    origin   = vec2(10, 10),
+    home     = true,
 
     -- Thousands of marks generated region by region: without reordering, the
     -- pen spends most of the plot travelling between them.

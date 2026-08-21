@@ -10,6 +10,7 @@ macOS and Linux only (POSIX termios serial).
 local plotter = require 'plotter'
 
 plotter.init { mode = "svg", width = 200, height = 200, svg_file = "out.svg" }
+-- for hardware, add: origin = vec2(43, 127)  -- where the paper sits on the bed
 
 plotter.rect(10, 10, 180, 180)
 plotter.text(20, 100, "hello", 20)
@@ -29,6 +30,7 @@ make test        # run the test suite
 ## Usage
 
 ```sh
+./luaplot --help                               # options, tools, environment
 ./luaplot examples/hello.lua                   # SVG preview (default)
 ./luaplot examples/hello.lua gcode             # write a G-code file
 ./luaplot examples/hello.lua serial            # send to the plotter
@@ -120,6 +122,13 @@ are hunting for the travel limits:
 
 ```sh
 ./luaplot tools/servo-sweep.lua            # sends only M3 S<n>; no motion
+```
+
+Jog the head around to find where your paper sits — arrow keys, live
+coordinates, and `0` to zero the work origin at a corner:
+
+```sh
+./luaplot tools/jog.lua --pen-up 0 --pen-down 150
 ```
 
 Then fit the pen and check it reaches the paper everywhere:

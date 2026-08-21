@@ -32,7 +32,7 @@
 local plotter = require 'plotter'
 local util    = require 'util'
 
-local W, H = 200, 260
+local W, H = 280, 350
 
 -- Mode and port come from the command line so this file works on any machine.
 local mode = arg[1] or "svg"
@@ -51,7 +51,7 @@ local STEP      = 1.2          -- mm per integration step
 local MAX_STEPS = 600          -- longest a line may run
 local MIN_STEPS = 20           -- discard lines that die almost immediately
 local SEPARATION = 1.6         -- minimum mm between any two lines
-local MARGIN    = 8            -- keep the drawing off the page edge
+local MARGIN    = 20            -- keep the drawing off the page edge
 
 -- ── Setup ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +65,7 @@ plotter.init {
     pen_up   = pen_up,
     pen_down = pen_down,
     svg_file = "flowfield.svg",
+    home     = true,
 
     -- Streamlines are generated in scatter order, so consecutive paths can
     -- start at opposite corners. Reordering them is a large saving here.

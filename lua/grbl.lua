@@ -305,6 +305,87 @@ tell it.
     return false
 end
 
+-- ── Status reports ────────────────────────────────────────────────────────────
+
+--[[
+    GRBL sends the work coordinate offset only occasionally -- roughly every
+    tenth report -- because it rarely changes and the serial line is precious.
+    Every report in between omits it, so a reader has to remember the last one
+    or it cannot convert between machine and work coordinates.
+
+    Cached here rather than in the caller so every consumer gets it right.
+--]]
+local last_wco = { x = 0, y = 0, z = 0 }
+
+local function triple(text)
+    local x, y, z = text:match("^([%-%d%.]+),([%-%d%.]+),([%-%d%.]*)")
+    if not x then return nil end
+    return { x = tonumber(x), y = tonumber(y), z = tonumber(z) or 0 }
+end
+
+--[[
+    parse_status(line) -> table
+
+    Turn a status report into
+        { state = "Idle", mpos = {x,y,z}, wpos = {x,y,z}, wco = {x,y,z} }
+
+    GRBL reports EITHER machine position or work position, depending on $10,
+    and the other is derived from the work coordinate offset:
+
+        wpos = mpos - wco
+
+    Both are always filled in, so callers never have to care which the
+    controller happened to send.
+--]]
+function M.parse_status(line)
+    local out = { raw = line }
+
+    out.state = line:match("^<([%a:%d]+)") or "?"
+
+    local wco = line:match("|WCO:([%-%d%.,]+)")
+    if wco then
+        local t = triple(wco)
+        if t then last_wco = t end
+    end
+    out.wco = last_wco
+
+    local mpos = line:match("|MPos:([%-%d%.,]+)")
+    local wpos = line:match("|WPos:([%-%d%.,]+)")
+
+    if mpos then
+        out.mpos = triple(mpos)
+        out.wpos = {
+            x = out.mpos.x - last_wco.x,
+            y = out.mpos.y - last_wco.y,
+            z = out.mpos.z - last_wco.z,
+        }
+    elseif wpos then
+        out.wpos = triple(wpos)
+        out.mpos = {
+            x = out.wpos.x + last_wco.x,
+            y = out.wpos.y + last_wco.y,
+            z = out.wpos.z + last_wco.z,
+        }
+    end
+
+    local fs = line:match("|FS:([%d%.]+)")
+    out.feed = fs and tonumber(fs) or nil
+
+    return out
+end
+
+-- Forget the cached offset. Call after G92 or a work-coordinate change, so the
+-- next report is not converted with a stale one.
+function M.reset_wco()
+    last_wco = { x = 0, y = 0, z = 0 }
+end
+
+-- Read the machine's current state and position
+function M.status()
+    local serial = require 'serial'
+    return M.parse_status(serial.status())
+end
+
 --[[
     confirm(prompt) -> boolean
 
