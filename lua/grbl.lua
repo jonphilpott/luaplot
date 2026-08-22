@@ -313,9 +313,13 @@ end
     Every report in between omits it, so a reader has to remember the last one
     or it cannot convert between machine and work coordinates.
 
-    Cached here rather than in the caller so every consumer gets it right.
+    nil means NOT YET KNOWN, which is different from zero and must stay
+    different. Treating an unseen offset as zero silently reports work
+    coordinates as machine coordinates whenever GRBL is configured to send
+    WPos ($10 bit 0 clear) -- the two columns agree, both look plausible, and
+    both are wrong by however much the offset happens to be.
 --]]
-local last_wco = { x = 0, y = 0, z = 0 }
+local last_wco = nil
 
 local function triple(text)
     local x, y, z = text:match("^([%-%d%.]+),([%-%d%.]+),([%-%d%.]*)")
@@ -347,25 +351,35 @@ function M.parse_status(line)
         local t = triple(wco)
         if t then last_wco = t end
     end
-    out.wco = last_wco
+
+    -- Callers that care can check wco_known before trusting a derived figure
+    out.wco_known = last_wco ~= nil
+    out.wco = last_wco or { x = 0, y = 0, z = 0 }
 
     local mpos = line:match("|MPos:([%-%d%.,]+)")
     local wpos = line:match("|WPos:([%-%d%.,]+)")
 
+    local w = out.wco
+
     if mpos then
+        -- MPos is authoritative; only the derived work position needs the offset
         out.mpos = triple(mpos)
         out.wpos = {
-            x = out.mpos.x - last_wco.x,
-            y = out.mpos.y - last_wco.y,
-            z = out.mpos.z - last_wco.z,
+            x = out.mpos.x - w.x,
+            y = out.mpos.y - w.y,
+            z = out.mpos.z - w.z,
         }
+        out.derived = "wpos"
     elseif wpos then
+        -- WPos is authoritative and the MACHINE position is the derived one,
+        -- so an unknown offset corrupts the more important of the two
         out.wpos = triple(wpos)
         out.mpos = {
-            x = out.wpos.x + last_wco.x,
-            y = out.wpos.y + last_wco.y,
-            z = out.wpos.z + last_wco.z,
+            x = out.wpos.x + w.x,
+            y = out.wpos.y + w.y,
+            z = out.wpos.z + w.z,
         }
+        out.derived = "mpos"
     end
 
     local fs = line:match("|FS:([%d%.]+)")
@@ -374,16 +388,36 @@ function M.parse_status(line)
     return out
 end
 
--- Forget the cached offset. Call after G92 or a work-coordinate change, so the
--- next report is not converted with a stale one.
+--[[
+    Forget the cached offset, after a G92 or a work-coordinate change.
+
+    Sets it to UNKNOWN, not to zero. Zero is a claim about the machine; unknown
+    is the truth, and status() will go and find out.
+--]]
 function M.reset_wco()
-    last_wco = { x = 0, y = 0, z = 0 }
+    last_wco = nil
 end
 
--- Read the machine's current state and position
+--[[
+    status() -> table
+
+    The machine's current state and position.
+
+    Polls until GRBL has sent a work coordinate offset at least once, because
+    until then any position derived from it is a guess. GRBL includes WCO in
+    roughly every tenth report, so this normally costs one extra query and
+    never more than a handful.
+--]]
 function M.status()
     local serial = require 'serial'
-    return M.parse_status(serial.status())
+
+    local st = M.parse_status(serial.status())
+    for _ = 1, 15 do
+        if st.wco_known then break end
+        st = M.parse_status(serial.status())
+    end
+
+    return st
 end
 
 --[[

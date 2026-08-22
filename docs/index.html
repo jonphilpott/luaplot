@@ -445,18 +445,56 @@
     </tr>
     <tr>
       <td><strong>origin given</strong></td>
-      <td>Coordinates are absolute machine positions, so the plot lands in the same physical place every run. Needs the machine homed, and the preamble sends <code>G92.1</code> to clear any work offset still in force.</td>
+      <td>Every move is emitted with <code>G53</code> — absolute machine coordinates — so the plot lands in the same physical place every run. Needs the machine homed.</td>
     </tr>
   </tbody>
 </table>
 
 <div class="note">
-  <strong>That <code>G92.1</code> is not defensive programming.</strong>
-  <a href="#tool-jog">jog.lua</a> sets exactly such an offset when you press
-  <code>0</code> to mark the paper corner — which is the very workflow that
-  produces the origin you then pass in here. Without clearing it the plot would
-  land twice as far out as intended. luaplot also reads the machine's status
-  after connecting and warns if a work offset survives.
+  <strong>Why <code>G53</code> rather than clearing offsets.</strong>
+  <code>G92.1</code> cancels a <code>G92</code> offset but not a
+  <code>G54</code> one, which lives in EEPROM and survives everything — so a
+  machine carrying, say, a −199&nbsp;mm G54 offset would silently place the
+  whole plot 199&nbsp;mm from where it was asked to go. Stating the frame on
+  every block removes the assumption: no offset of any kind can displace the
+  output, and nothing has to be cleared first.
+</div>
+
+<div class="note">
+  <strong>The plot is checked against the machine's travel before anything
+  moves.</strong> luaplot reads <code>$130</code>/<code>$131</code> (maximum
+  travel) and <code>$23</code> (homing direction) and refuses to start if the
+  page will not fit:
+  <pre><code>luaplot error: this plot does not fit the machine and would drive into its limits.
+    X: the plot needs 4.0 to 283.0 mm, the machine reaches -300.0 to 0.0 mm ($130 = 300.0)
+    Y: the plot needs 4.0 to 360.0 mm, the machine reaches -380.0 to 0.0 mm ($131 = 380.0)</code></pre>
+  That <code>$23</code> matters more than it looks. A set bit means the axis
+  homes toward its <em>maximum</em>, which puts machine zero at that end and
+  makes the entire working area <strong>negative</strong> on that axis. On such
+  a machine a small positive origin like <code>(4, 4)</code> is not slightly
+  wrong — it is unreachable, and the head drives into the frame trying to get
+  there. Read the real numbers with <a href="#tool-jog">jog.lua</a>.
+  <br><br>
+  This check needs to interrogate the machine, so it only runs in serial mode.
+  It is worth enabling GRBL's own soft limits (<code>$20=1</code>) as well —
+  that is the backstop that protects everything, including G-code sent by other
+  software.
+</div>
+
+<div class="note">
+  <strong>If your machine boots into an alarm, use an explicit origin.</strong>
+  A machine with homing enabled refuses G-code until it has homed, so scripts
+  need <code>home = true</code> — and homing can move, or on some builds reset,
+  the work offset. A stored origin then cannot survive the very homing cycle
+  that has to happen first.
+  <br><br>
+  <code>origin = vec2(x, y)</code> is immune: every move carries
+  <code>G53</code>, so no offset of any kind can displace it. Pair it with
+  <code>home = true</code> and the plot lands in the same place every run
+  regardless of what homing does.
+  <br><br>
+  luaplot compares the offset before and after homing and warns if it moved,
+  rather than letting a plot come out quietly a few millimetres out.
 </div>
 
 <h3>Finding the numbers</h3>
@@ -700,6 +738,12 @@ y' = c·x + d·y + ty</code></pre>
       <td>Seconds to hold it lifted above the pot afterwards, so excess drips back in.</td>
     </tr>
     <tr>
+      <td>pen_delay</td>
+      <td class="type">number</td>
+      <td class="default">0.1</td>
+      <td>Seconds to wait after moving the pen servo. Must cover its real travel time — see <a href="#api-pen">Pen control</a>. <code>pen_up_delay</code> / <code>pen_down_delay</code> override it per direction.</td>
+    </tr>
+    <tr>
       <td>pen_dip</td>
       <td class="type">number</td>
       <td class="default">pen_down</td>
@@ -896,6 +940,25 @@ y' = c·x + d·y + ty</code></pre>
   so the servo reaches position before the next move. Has no effect if the
   pen is already up.
 </p>
+
+<div class="note">
+  <strong>The dwell after a pen move is not decoration.</strong>
+  <code>M3</code> tells the servo where to go; it says nothing about when it
+  arrives, and GRBL starts the next move immediately. If the pen is still on
+  its way up when a rapid begins, <em>it draws the rapid</em> — a line straight
+  across the finished work, usually the long diagonal to the parking position.
+  <br><br>
+  <code>pen_delay</code> has to cover your servo's actual travel time. The
+  0.1&nbsp;s default is brisk; a servo needing 0.3&nbsp;s will smear every lift
+  in the plot, and the parking traverse is just where it shows up worst. It is
+  paid twice per path, though, so a thousand-path plot notices a generous
+  value — time it rather than guessing high.
+  <br><br>
+  <code>plotter.penup(true)</code> forces the lift even when the pen is already
+  believed to be up. <code>done()</code> uses this before parking, because
+  <code>servo()</code> and <code>dip()</code> move the pen without updating the
+  tracked state, so "already up" is not always true.
+</div>
 
 <h3>plotter.pendown()</h3>
 <p>
@@ -1842,9 +1905,11 @@ S&gt; 30
     <tr><td><code>[</code> <code>]</code></td><td>Halve / double the step</td></tr>
     <tr><td><code>1</code> <code>2</code> <code>3</code> <code>4</code></td><td>Step 0.1, 1, 10, 50 mm</td></tr>
     <tr><td>space</td><td>Pen up / down</td></tr>
-    <tr><td><code>0</code></td><td>Set the work origin here (<code>G92</code>)</td></tr>
+    <tr><td><code>0</code></td><td>Store the work origin here, persistently</td></tr>
     <tr><td><code>m</code> / <code>o</code></td><td>Go to machine zero / the work origin</td></tr>
     <tr><td><code>h</code></td><td>Home (<code>$H</code>)</td></tr>
+    <tr><td><code>p</code></td><td>Show the raw status report and the work offset</td></tr>
+    <tr><td><code>c</code></td><td>Clear all work offsets, so work equals machine</td></tr>
     <tr><td><code>q</code></td><td>Quit, lifting the pen</td></tr>
   </tbody>
 </table>
@@ -2167,18 +2232,56 @@ $ ./luaplot tools/grbl-config.lua restore grbl-backup.txt
     </tr>
     <tr>
       <td><strong>origin given</strong></td>
-      <td>Coordinates are absolute machine positions, so the plot lands in the same physical place every run. Needs the machine homed, and the preamble sends <code>G92.1</code> to clear any work offset still in force.</td>
+      <td>Every move is emitted with <code>G53</code> — absolute machine coordinates — so the plot lands in the same physical place every run. Needs the machine homed.</td>
     </tr>
   </tbody>
 </table>
 
 <div class="note">
-  <strong>That <code>G92.1</code> is not defensive programming.</strong>
-  <a href="#tool-jog">jog.lua</a> sets exactly such an offset when you press
-  <code>0</code> to mark the paper corner — which is the very workflow that
-  produces the origin you then pass in here. Without clearing it the plot would
-  land twice as far out as intended. luaplot also reads the machine's status
-  after connecting and warns if a work offset survives.
+  <strong>Why <code>G53</code> rather than clearing offsets.</strong>
+  <code>G92.1</code> cancels a <code>G92</code> offset but not a
+  <code>G54</code> one, which lives in EEPROM and survives everything — so a
+  machine carrying, say, a −199&nbsp;mm G54 offset would silently place the
+  whole plot 199&nbsp;mm from where it was asked to go. Stating the frame on
+  every block removes the assumption: no offset of any kind can displace the
+  output, and nothing has to be cleared first.
+</div>
+
+<div class="note">
+  <strong>The plot is checked against the machine's travel before anything
+  moves.</strong> luaplot reads <code>$130</code>/<code>$131</code> (maximum
+  travel) and <code>$23</code> (homing direction) and refuses to start if the
+  page will not fit:
+  <pre><code>luaplot error: this plot does not fit the machine and would drive into its limits.
+    X: the plot needs 4.0 to 283.0 mm, the machine reaches -300.0 to 0.0 mm ($130 = 300.0)
+    Y: the plot needs 4.0 to 360.0 mm, the machine reaches -380.0 to 0.0 mm ($131 = 380.0)</code></pre>
+  That <code>$23</code> matters more than it looks. A set bit means the axis
+  homes toward its <em>maximum</em>, which puts machine zero at that end and
+  makes the entire working area <strong>negative</strong> on that axis. On such
+  a machine a small positive origin like <code>(4, 4)</code> is not slightly
+  wrong — it is unreachable, and the head drives into the frame trying to get
+  there. Read the real numbers with <a href="#tool-jog">jog.lua</a>.
+  <br><br>
+  This check needs to interrogate the machine, so it only runs in serial mode.
+  It is worth enabling GRBL's own soft limits (<code>$20=1</code>) as well —
+  that is the backstop that protects everything, including G-code sent by other
+  software.
+</div>
+
+<div class="note">
+  <strong>If your machine boots into an alarm, use an explicit origin.</strong>
+  A machine with homing enabled refuses G-code until it has homed, so scripts
+  need <code>home = true</code> — and homing can move, or on some builds reset,
+  the work offset. A stored origin then cannot survive the very homing cycle
+  that has to happen first.
+  <br><br>
+  <code>origin = vec2(x, y)</code> is immune: every move carries
+  <code>G53</code>, so no offset of any kind can displace it. Pair it with
+  <code>home = true</code> and the plot lands in the same place every run
+  regardless of what homing does.
+  <br><br>
+  luaplot compares the offset before and after homing and warns if it moved,
+  rather than letting a plot come out quietly a few millimetres out.
 </div>
 
 <h3>Finding the numbers</h3>

@@ -357,12 +357,29 @@ t.describe("origin", function()
             "expected (30,40) to land at (30+43, 200-40+127)")
     end)
 
-    t.it("clears stale work offsets instead of zeroing the frame", function()
+    t.it("states the machine frame on every move", function()
         local g = gcode_lines { origin = {43, 127} }
-        t.assert_true(g:find("G92.1", 1, true) ~= nil,
-            "an absolute plot has to cancel any G92 offset in force")
+
+        -- G53 rather than clearing offsets: G92.1 cancels a G92 offset but not
+        -- a G54 one, which lives in EEPROM. An earlier version assumed the
+        -- frame and silently displaced the whole plot by the G54 offset.
+        for line in g:gmatch("[^\n]+") do
+            if line:match("^G[01] ") then
+                error("a move without G53 in an absolute plot: " .. line)
+            end
+        end
+        t.assert_true(g:find("G53 G0 ", 1, true) ~= nil, "expected G53 rapids")
+        t.assert_true(g:find("G53 G1 ", 1, true) ~= nil, "expected G53 feed moves")
+
         t.assert_nil(g:match("G92 X0 Y0 Z0"),
-            "and must not re-zero the frame at the head")
+            "must not re-zero the frame at the head")
+    end)
+
+    t.it("leaves relative plots in the work frame", function()
+        local g = gcode_lines {}
+        t.assert_nil(g:match("G53"),
+            "without an origin the plot is relative and must not claim otherwise")
+        t.assert_true(g:find("G92 X0 Y0 Z0", 1, true) ~= nil)
     end)
 
     t.it("accepts a vec2", function()
@@ -372,14 +389,14 @@ t.describe("origin", function()
 
     t.it("parks at the page corner rather than machine zero", function()
         local g = gcode_lines { origin = {43, 127} }
-        t.assert_true(g:find("G0 X43.000 Y127.000", 1, true) ~= nil,
+        t.assert_true(g:find("G53 G0 X43.000 Y127.000", 1, true) ~= nil,
             "parking at machine zero could be a long traverse away")
     end)
 
     t.it("an origin of 0,0 still means absolute", function()
         -- Explicitly asking for the machine frame is different from not asking
         local g = gcode_lines { origin = {0, 0} }
-        t.assert_true(g:find("G92.1", 1, true) ~= nil)
+        t.assert_true(g:find("G53 ", 1, true) ~= nil)
         t.assert_nil(g:match("G92 X0 Y0 Z0"))
     end)
 

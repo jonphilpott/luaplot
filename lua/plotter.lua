@@ -320,10 +320,29 @@ end
 --]]
 local function gmove(x, y, feed)
     local mx, my = to_machine(x, y)
+
+    --[[
+        With an origin set, every move says G53 -- "this block is in machine
+        coordinates" -- rather than trusting whatever frame happens to be in
+        force.
+
+        Assuming the frame was the bug that made an earlier version dangerous.
+        G92.1 cancels a G92 offset but NOT a G54 one, which lives in EEPROM and
+        survives everything; a machine carrying, say, a -199 mm G54 offset
+        would silently place the whole plot 199 mm from where it was asked to
+        go. G53 removes the assumption entirely: no offset of any kind can
+        displace the output, and nothing has to be cleared first.
+
+        G53 is not modal, so it goes on every block. It also requires a homed
+        machine, which is the right precondition anyway -- machine coordinates
+        are meaningless otherwise, and GRBL refuses rather than guessing.
+    --]]
+    local frame = cfg.absolute and "G53 " or ""
+
     if feed then
-        gcode(string.format("G1 X%s Y%s F%s", gfmt(mx), gfmt(my), gfmt(feed)))
+        gcode(string.format("%sG1 X%s Y%s F%s", frame, gfmt(mx), gfmt(my), gfmt(feed)))
     else
-        gcode(string.format("G0 X%s Y%s", gfmt(mx), gfmt(my)))
+        gcode(string.format("%sG0 X%s Y%s", frame, gfmt(mx), gfmt(my)))
     end
 end
 
@@ -445,19 +464,37 @@ end
     We repurpose this: servo position for pen up vs pen down.
     The actual values come from cfg.pen_up and cfg.pen_down.
 --]]
-function M.penup()
-    if pen_down then
+--[[
+    plotter.penup(force)
+
+    The dwell is not decoration. M3 only tells the servo where to go; it says
+    nothing about when it arrives, and GRBL will start the next move
+    immediately. If the pen is still on its way up when a rapid begins, it
+    draws the rapid -- a line straight across the finished work, usually the
+    long diagonal to the parking position.
+
+    pen_delay has to cover the servo's actual travel time. The 0.1 s default is
+    brisk; a servo that needs 0.3 s will smear every pen lift in the plot, and
+    the parking traverse is simply where it shows up most.
+
+    force emits the lift even when the pen is already believed to be up. Worth
+    it before a long move: plotter.servo() and plotter.dip() both move the pen
+    without going through here, so the tracked state can lag the real one, and
+    the cost of an unnecessary lift is one command against a ruined sheet.
+--]]
+function M.penup(force)
+    if pen_down or force then
         gcode(string.format("M3 S%d", cfg.pen_up))
-        -- small dwell so the servo reaches position before we move
-        gcode("G4 P0.1")
+        -- %g keeps a plain 0.1 rather than 0.100
+        gcode(string.format("G4 P%g", cfg.pen_up_delay))
         pen_down = false
     end
 end
 
-function M.pendown()
-    if not pen_down then
+function M.pendown(force)
+    if not pen_down or force then
         gcode(string.format("M3 S%d", cfg.pen_down))
-        gcode("G4 P0.1")
+        gcode(string.format("G4 P%g", cfg.pen_down_delay))
         pen_down = true
     end
 end
@@ -2056,6 +2093,140 @@ function M.grbl_set(n, value)
     serial.writeline(string.format("$%d=%s", n, tostring(value)))
 end
 
+--[[
+    Refuse to plot outside the machine's reach.
+
+    The check that was missing. An origin that does not fit puts the head into
+    the frame at speed, and neither GRBL nor luaplot had anything to say about
+    it beforehand -- GRBL only stops you if soft limits are switched on, and
+    most machines ship with them off.
+
+    GRBL's own settings say where the machine can go:
+
+        $130 / $131   maximum travel per axis, always a positive length
+        $23           homing direction mask. A set bit means that axis homes
+                      toward its maximum, which puts machine zero at that end
+                      and makes the whole working area NEGATIVE on that axis.
+
+    So the reachable span is either 0..+travel or -travel..0, and which one it
+    is depends on the machine. That sign is exactly what catches the common
+    mistake of passing a small positive origin like (4, 4) to a machine whose
+    coordinates all run negative -- a plot that is not merely misplaced but
+    entirely unreachable.
+
+    Only possible over serial: it needs to interrogate the machine. In gcode
+    mode the file is checked by whatever sends it.
+--]]
+local function check_travel()
+    --[[
+        In "work" mode the page is placed by the machine's own work offset
+        rather than by anything luaplot was told, so read it back and use it as
+        the effective origin. That keeps the limit check honest in the one mode
+        where luaplot does not otherwise know where the page will land.
+    --]]
+    local origin = cfg.origin
+
+    if cfg.use_wcs then
+        local ok, st = pcall(M.status)
+
+        -- wco_known, not wco: the latter falls back to zero so that arithmetic
+        -- elsewhere stays simple, which would quietly turn "I could not read
+        -- the offset" into "the offset is zero" -- the exact confusion this
+        -- check exists to catch.
+        if not ok or not st.wco_known then
+            warn("travel", "could not read the machine's work offset, so the " ..
+                           "plot has not been checked against its travel limits.")
+            return
+        end
+        origin = { x = st.wco.x, y = st.wco.y }
+    end
+
+    local ok, settings = pcall(M.grbl_settings)
+    if not ok then
+        warn("travel", "could not read the machine settings, so the plot has " ..
+                       "not been checked against its travel limits: " ..
+                       tostring(settings))
+        return
+    end
+
+    local travel = { x = settings[130], y = settings[131] }
+    if not travel.x or not travel.y or travel.x <= 0 or travel.y <= 0 then
+        warn("travel", "the machine does not report a maximum travel " ..
+                       "($130/$131), so the plot has not been checked " ..
+                       "against its limits.")
+        return
+    end
+
+    local mask = settings[23] or 0
+    local axes = {
+        { name = "X", lo = 0, hi = 0, need_lo = origin.x,
+          need_hi = origin.x + cfg.width,  travel = travel.x,
+          negative = (mask & 1) ~= 0, setting = 130 },
+        { name = "Y", lo = 0, hi = 0, need_lo = origin.y,
+          need_hi = origin.y + cfg.height, travel = travel.y,
+          negative = (mask & 2) ~= 0, setting = 131 },
+    }
+
+    local problems = {}
+
+    for _, a in ipairs(axes) do
+        if a.negative then a.lo, a.hi = -a.travel, 0
+        else               a.lo, a.hi = 0, a.travel end
+
+        -- A hair of slack: limits are measured, and demanding exact equality
+        -- would reject a plot that genuinely fits.
+        local EPS = 0.001
+        if a.need_lo < a.lo - EPS or a.need_hi > a.hi + EPS then
+            problems[#problems + 1] = string.format(
+                "    %s: the plot needs %.1f to %.1f mm, the machine reaches " ..
+                "%.1f to %.1f mm ($%d = %.1f)",
+                a.name, a.need_lo, a.need_hi, a.lo, a.hi, a.setting, a.travel)
+        end
+    end
+
+    if #problems == 0 then return end
+
+    --[[
+        The advice depends on how the page was placed, and getting it wrong is
+        worse than giving none: telling someone in "work" mode to go and read
+        machine coordinates sends them to look up a number they will never
+        type in.
+    --]]
+    local advice
+    if cfg.use_wcs then
+        advice = string.format(
+            "  origin = \"work\" places the page at the machine's stored work " ..
+            "origin, which is\n" ..
+            "  currently (%.1f, %.1f)%s.\n" ..
+            "  Store the right one: run tools/jog.lua, drive to the near-left " ..
+            "corner of your\n" ..
+            "  paper, and press 0. It is kept in EEPROM, so this is a " ..
+            "once-only step.",
+            origin.x, origin.y,
+            (math.abs(origin.x) < 1e-6 and math.abs(origin.y) < 1e-6)
+                and " -- that is machine zero, the corner the machine homes to,"
+                    .. " so the page runs off the bed from there"
+                or "")
+    else
+        advice =
+            "  The origin is the machine position of the page's near-left " ..
+            "corner, and the\n" ..
+            "  page extends right and away from it.\n" ..
+            "  Use tools/jog.lua to read the real machine coordinates of your " ..
+            "paper corner --\n" ..
+            "  on a machine that homes to its maximum they are negative, not " ..
+            "small positives."
+    end
+
+    error(string.format(
+        "this plot does not fit the machine and would drive into its limits.\n" ..
+        "%s\n" ..
+        "  The page is %.0f x %.0f mm.\n" ..
+        "%s\n" ..
+        "  Nothing has been sent to the machine.",
+        table.concat(problems, "\n"), cfg.width, cfg.height, advice), 0)
+end
+
 -- ── Init & done ───────────────────────────────────────────────────────────────
 
 --[[
@@ -2067,11 +2238,20 @@ end
         height    work area height in mm (also SVG viewport height)
 
     Optional (all modes):
-        origin    machine coordinates of the paper's near-left corner, as a
-                  vec2 or {x, y}. Omitted, the plot starts wherever the head
-                  is parked; given, it lands at the same physical place every
-                  time. See the note in init() -- it changes which coordinate
-                  frame is emitted, and the absolute frame needs homing.
+        origin    where the page sits on the bed. One of:
+
+                    omitted        the page starts wherever the head is parked
+                                   (G92). Needs no homing.
+                    "work"         use the machine's stored work origin, so
+                                   page coordinates are plain and positive.
+                                   Set it once with 0 in tools/jog.lua. Not
+                                   suitable if the machine must home first and
+                                   homing moves the offset -- luaplot warns.
+                    vec2 / {x, y}  machine coordinates of the page's near-left
+                                   corner; every move is emitted as absolute
+                                   machine position (G53). Needs homing.
+
+                  See "Placing the page" in docs/index.html.
 
     Optional (serial/both mode):
         port      serial port path  (default "/dev/ttyUSB0")
@@ -2079,6 +2259,10 @@ end
         feed      feed rate mm/min  (default 1000)
         pen_up    spindle S value for pen up   (default 90)
         pen_down  spindle S value for pen down (default 30)
+        pen_delay seconds to wait after moving the pen servo (default 0.1).
+                  Must cover the servo's real travel time, or a rapid begins
+                  while the pen is still coming up and draws a line across the
+                  work. pen_up_delay / pen_down_delay override it per direction.
         home      if true, run $H homing cycle on connect (default false)
         unlock    if true, clear GRBL's alarm with $X on connect, without
                   homing (default false). One of these two is needed whenever
@@ -2139,6 +2323,20 @@ function M.init(config)
     cfg.pen_dip = config.pen_dip or cfg.pen_down
 
     --[[
+        How long to wait after commanding the pen servo, in seconds.
+
+        Long enough that the pen has actually finished moving before the next
+        move starts. Too short and every lift smears; too long and it is paid
+        twice per path, so a thousand-path plot notices.
+
+        Separate up and down values because they are not always symmetric --
+        a spring-loaded holder often drops faster than it lifts.
+    --]]
+    cfg.pen_delay      = config.pen_delay      or 0.1
+    cfg.pen_up_delay   = config.pen_up_delay   or cfg.pen_delay
+    cfg.pen_down_delay = config.pen_down_delay or cfg.pen_delay
+
+    --[[
         Where the page sits on the bed.
 
         Given as machine coordinates of the paper's NEAR-LEFT corner -- the
@@ -2158,13 +2356,33 @@ function M.init(config)
                            This needs the machine homed, and any leftover G92
                            offset cleared -- which the preamble does.
     --]]
-    if config.origin then
+    if config.origin == "work" or config.origin == "current" then
+        --[[
+            The work coordinate system is already where it should be, so use
+            it: emit plain positive coordinates and set nothing up.
+
+            This is the friendliest mode for a fixed rig, and the one worth
+            reaching for first. Park the head at the paper corner once, press 0
+            in tools/jog.lua to store it as the G54 work origin -- which lives
+            in EEPROM and survives power cycles -- and from then on every plot
+            runs in positive page coordinates and lands in the same place. No
+            machine coordinates to look up, and nothing negative to reason
+            about.
+        --]]
+        cfg.origin = { x = 0, y = 0 }
+        cfg.absolute = false
+        cfg.use_wcs = true
+
+    elseif config.origin then
         local ox, oy = xy(config.origin)
         cfg.origin = { x = ox, y = oy }
         cfg.absolute = true
+        cfg.use_wcs = false
+
     else
         cfg.origin = { x = 0, y = 0 }
         cfg.absolute = false
+        cfg.use_wcs = false
     end
 
     -- Reordering means holding paths back until flush(), so it cannot coexist
@@ -2233,8 +2451,44 @@ function M.init(config)
         which said nothing about what to do.
     --]]
     if want_serial() then
+        --[[
+            Homing can move the work offset, and on some machines it resets it
+            outright -- so a stored origin does not survive the very homing
+            cycle that a machine booting into alarm has to perform first.
+
+            Rather than assume either way, note the offset, home, and compare.
+            Anyone relying on origin = "work" then finds out immediately
+            instead of measuring a plot that is quietly a few millimetres out.
+        --]]
+        local before
+        if cfg.home and cfg.use_wcs then
+            local ok, st = pcall(M.status)
+            if ok and st.wco_known then before = { x = st.wco.x, y = st.wco.y } end
+        end
+
         if cfg.home then
             M.home()
+
+            if before then
+                local ok, st = pcall(M.status)
+                if ok and st.wco_known and
+                   (math.abs(st.wco.x - before.x) > 0.01 or
+                    math.abs(st.wco.y - before.y) > 0.01) then
+                    warn("home_wco", string.format(
+                        "homing changed the work offset from (%.2f, %.2f) to " ..
+                        "(%.2f, %.2f), so origin = \"work\" is no longer the " ..
+                        "corner you stored and this plot will be about " ..
+                        "(%.1f, %.1f) mm out.\n" ..
+                        "  On a machine that must home before it will accept " ..
+                        "G-code, pass the corner explicitly instead:\n" ..
+                        "    origin = vec2(%.2f, %.2f)\n" ..
+                        "  which is emitted as absolute machine coordinates " ..
+                        "(G53) and cannot be displaced by any offset.",
+                        before.x, before.y, st.wco.x, st.wco.y,
+                        st.wco.x - before.x, st.wco.y - before.y,
+                        before.x, before.y))
+                end
+            end
         elseif cfg.unlock then
             M.unlock()
         elseif M.is_locked() then
@@ -2253,45 +2507,32 @@ function M.init(config)
         end
     end
 
+    --[[
+        Everything above this point is talk; the preamble is the first thing
+        that can move the head. So the travel check goes here, before a single
+        motion command is emitted, and it raises rather than warns: a plot that
+        cannot fit is not a plot with a caveat.
+    --]]
+    if (cfg.absolute or cfg.use_wcs) and want_serial() then
+        check_travel()
+    end
+
     -- Emit G-code preamble (goes to serial, file, or both depending on mode)
     if want_gcode() then
         gcode("G21")          -- metric units
         gcode("G90")          -- absolute positioning
 
-        if cfg.absolute then
-            --[[
-                An explicit origin means the coordinates below are machine
-                positions, so any work offset in force has to go first --
-                otherwise the plot lands wherever the last G92 happened to
-                leave the frame.
-
-                This is not hypothetical: tools/jog.lua sets exactly such an
-                offset when you press 0 to mark the paper corner, which is
-                the very workflow that produces the origin you are passing in
-                here. G92.1 cancels it.
-            --]]
-            gcode("G92.1")
-        else
-            -- No origin given, so the page starts where the head is now
+        if not cfg.absolute and not cfg.use_wcs then
+            -- No origin given, so the page starts where the head is now.
+            --
+            -- Emphatically NOT sent in "work" mode: this is the line that
+            -- would throw away the stored origin, which is the whole point of
+            -- that mode. With an absolute origin every move carries G53
+            -- instead, and no work offset can reach it.
             gcode("G92 X0 Y0 Z0")
         end
 
         gcode("M3 S0")        -- spindle on at 0 (servo initialise)
-    end
-
-    -- A stale work offset would silently displace an absolute plot, and the
-    -- machine can tell us. Cheap to check, and the failure is otherwise a
-    -- ruined sheet of paper.
-    if cfg.absolute and want_serial() then
-        local ok, st = pcall(M.status)
-        if ok and st.wco and (math.abs(st.wco.x) > 1e-6 or math.abs(st.wco.y) > 1e-6) then
-            warn("wco", string.format(
-                "a work coordinate offset of (%.2f, %.2f) is still in force, " ..
-                "so this plot will land that far from the origin you asked " ..
-                "for. Clear it with G10 L2 P1 X0 Y0, or drop the origin " ..
-                "option to plot relative to the head's current position.",
-                st.wco.x, st.wco.y))
-        end
     end
 end
 
@@ -2353,8 +2594,8 @@ end
 --[[
     plotter.done([opts])
 
-    Finish the plot: flush anything pending, lift the pen, return to the
-    origin, write the output files, and close the serial port.
+    Finish the plot: flush anything pending, lift the pen, park, write the
+    output files, and close the serial port.
 
     Idempotent — calling it more than once is safe.  If you want the park and
     the file write but intend to keep drawing, pass { keep_open = true }, or
@@ -2368,7 +2609,17 @@ function M.done(opts)
     M.flush()
 
     if not finished and want_gcode() then
-        M.penup()
+        --[[
+            Forced, because the parking move is the longest rapid in the plot
+            and the one that crosses the finished work.
+
+            An unforced penup() does nothing here: the last path lifted the pen
+            already, so the flag reads up and no dwell is emitted -- leaving
+            the traverse protected only by that path's dwell, and not at all if
+            servo() or dip() left the real pen somewhere else.
+        --]]
+        M.penup(true)
+
         -- Park at the page's near-left corner. With an origin set that is a
         -- real place on the bed rather than machine zero, which could be a
         -- long unnecessary traverse away.
